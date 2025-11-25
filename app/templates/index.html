@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Education Document Server{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <header class="page-header">
+        <h1>Document Dashboard</h1>
+        <p class="subtitle">Manage and search your educational documents</p>
+    </header>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">📄</div>
+            <div class="stat-content">
+                <span class="stat-value">{{ total_documents }}</span>
+                <span class="stat-label">Total Documents</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">📁</div>
+            <div class="stat-content">
+                <span class="stat-value" id="scan-folder-status">Active</span>
+                <span class="stat-label">Scan Folder</span>
+            </div>
+        </div>
+        <div class="stat-card action-card">
+            <a href="/review" class="stat-link">
+                <div class="stat-icon">📝</div>
+                <div class="stat-content">
+                    <span class="stat-value">{{ review_count }}</span>
+                    <span class="stat-label">Needs Review</span>
+                </div>
+            </a>
+        </div>
+        <div class="stat-card action-card">
+            <a href="/search" class="stat-link">
+                <div class="stat-icon">🔍</div>
+                <div class="stat-content">
+                    <span class="stat-value">Search</span>
+                    <span class="stat-label">Find Documents</span>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <section class="recent-section">
+        <div class="section-header">
+            <h2>Recent Documents</h2>
+            <a href="/search" class="view-all-link">View All →</a>
+        </div>
+
+        {% if recent_documents %}
+        <div class="documents-table-container">
+            <table class="documents-table">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Course</th>
+                        <th>Assignment</th>
+                        <th>Grade</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for doc in recent_documents %}
+                    <tr>
+                        <td class="cell-student">{{ doc.student_name or '—' }}</td>
+                        <td class="cell-course">{{ doc.course_name or '—' }}</td>
+                        <td class="cell-assignment">{{ doc.assignment_name or '—' }}</td>
+                        <td class="cell-grade">
+                            {% if doc.grade %}
+                            <span class="grade-badge">{{ doc.grade }}</span>
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
+                        <td class="cell-date">{{ doc.document_date.strftime('%Y-%m-%d') if doc.document_date else '—' }}</td>
+                        <td class="cell-status">
+                            {% if doc.requires_review %}
+                            <span class="review-badge">Needs Review</span>
+                            {% else %}
+                            <span class="review-badge review-badge-success">Complete</span>
+                            {% endif %}
+                        </td>
+                        <td class="cell-actions">
+                            <a href="/documents/{{ doc.id }}" class="btn btn-small">View</a>
+                            <button type="button" class="btn btn-small btn-danger btn-delete" data-id="{{ doc.id }}">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <h3>No Documents Yet</h3>
+            <p>Place scanned documents in the scan folder to get started.</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="upload-section">
+        <div class="section-header">
+            <h2>Upload Document</h2>
+        </div>
+        <form id="upload-form" class="upload-form" enctype="multipart/form-data">
+            <div class="upload-dropzone" id="dropzone">
+                <div class="dropzone-content">
+                    <span class="dropzone-icon">📤</span>
+                    <p class="dropzone-text">Drag & drop a document here or click to browse</p>
+                    <p class="dropzone-hint">Supports PDF, PNG, JPG, TIFF</p>
+                </div>
+                <input type="file" id="file-input" name="file" accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.bmp" hidden>
+            </div>
+            <div id="upload-progress" class="upload-progress hidden">
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+                <span class="progress-text">Uploading...</span>
+            </div>
+        </form>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const uploadProgress = document.getElementById('upload-progress');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            uploadFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length) {
+            uploadFile(e.target.files[0]);
+        }
+    });
+
+    document.querySelectorAll('.btn-delete').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const docId = button.dataset.id;
+            if (!docId) return;
+            const confirmed = confirm('Delete this document and its stored file? This cannot be undone.');
+            if (!confirmed) return;
+
+            button.disabled = true;
+            try {
+                const response = await fetch(`/api/documents/${docId}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) {
+                    throw new Error('Delete failed');
+                }
+                const row = button.closest('tr');
+                if (row) row.remove();
+            } catch (error) {
+                alert('Failed to delete document. Please try again.');
+                button.disabled = false;
+            }
+        });
+    });
+
+    async function uploadFile(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        uploadProgress.classList.remove('hidden');
+        dropzone.classList.add('uploading');
+
+        try {
+            const response = await fetch('/api/documents/upload/manual', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                const doc = await response.json();
+                window.location.href = `/documents/${doc.id}`;
+            } else {
+                alert('Upload failed. Please try again.');
+            }
+        } catch (error) {
+            alert('Upload failed: ' + error.message);
+        } finally {
+            uploadProgress.classList.add('hidden');
+            dropzone.classList.remove('uploading');
+        }
+    }
+});
+</script>
+{% endblock %}
+

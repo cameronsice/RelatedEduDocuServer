@@ -1,0 +1,303 @@
+"""Storage service for optimizing and storing documents."""
+
+import logging
+import shutil
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Tuple, Optional
+
+from PIL import Image
+from pdf2image import convert_from_path
+
+from app.config import (
+    STORAGE_PATH,
+    STORAGE_REVIEW_PATH,
+    MAX_IMAGE_DIMENSION,
+    JPEG_QUALITY,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class StorageService:
+    """Service for optimizing and storing scanned documents."""
+    
+    def __init__(self):
+        """Initialize the storage service."""
+        self.storage_path = STORAGE_PATH
+        self.review_path = STORAGE_REVIEW_PATH
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+        self.review_path.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "Storage service initialized with paths: final=%s review=%s",
+            self.storage_path,
+            self.review_path,
+        )
+    
+    def store_document(self, source_path: Path) -> Tuple[str, Path]:
+        """
+        Optimize and store a document.
+        
+        Args:
+            source_path: Path to the source document
+            
+        Returns:
+            Tuple of (document_id, stored_path)
+        """
+        # Generate unique document ID
+        doc_id = str(uuid.uuid4())
+        
+        # Create date-based subdirectory for organization
+        date_dir = datetime.now().strftime("%Y/%m/%d")
+        target_dir = (self.storage_path / date_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_dir = target_dir.resolve()
+
+        suffix = source_path.suffix.lower()
+
+        try:
+            if suffix == ".pdf":
+                stored_path = self._store_pdf(source_path, target_dir, doc_id)
+            else:
+                stored_path = self._store_image(source_path, target_dir, doc_id)
+
+            logger.info(f"Document stored: {stored_path}")
+            return doc_id, stored_path.resolve()
+
+        except Exception as e:
+            logger.error(f"Failed to store document {source_path}: {e}")
+            raise
+    
+    def _store_image(self, source_path: Path, target_dir: Path, doc_id: str) -> Path:
+        """
+        Optimize and store an image file.
+        
+        Args:
+            source_path: Path to the source image
+            target_dir: Directory to store the optimized image
+            doc_id: Document ID for the filename
+            
+        Returns:
+            Path to the stored image
+        """
+        target_path = target_dir / f"{doc_id}.jpg"
+        
+        with Image.open(source_path) as img:
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'P', 'LA', 'L'):
+                # Create white background for transparent images
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                    img = background
+                else:
+                    img = img.convert('RGB')
+            
+            # Resize if too large while maintaining aspect ratio
+            img = self._resize_if_needed(img)
+            
+            # Save optimized image
+            img.save(target_path, 'JPEG', quality=JPEG_QUALITY, optimize=True)
+        
+        return target_path
+    
+    def _store_pdf(self, source_path: Path, target_dir: Path, doc_id: str) -> Path:
+        """
+        Store a PDF file, optionally converting to optimized images.
+        
+        For PDFs, we keep the original but also create optimized preview images.
+        
+        Args:
+            source_path: Path to the source PDF
+            target_dir: Directory to store the document
+            doc_id: Document ID for the filename
+            
+        Returns:
+            Path to the stored PDF
+        """
+        # Copy the original PDF
+        target_path = target_dir / f"{doc_id}.pdf"
+        shutil.copy2(source_path, target_path)
+        
+        # Create preview images for each page
+        try:
+            preview_dir = target_dir / f"{doc_id}_previews"
+            preview_dir.mkdir(exist_ok=True)
+            
+            pages = convert_from_path(source_path, dpi=150)  # Lower DPI for previews
+            
+            for i, page in enumerate(pages):
+                preview_path = preview_dir / f"page_{i + 1}.jpg"
+                
+                # Convert to RGB if necessary
+                if page.mode != 'RGB':
+                    page = page.convert('RGB')
+                
+                # Resize if needed
+                page = self._resize_if_needed(page)
+                
+                # Save preview
+                page.save(preview_path, 'JPEG', quality=JPEG_QUALITY, optimize=True)
+            
+            logger.info(f"Created {len(pages)} preview images for PDF")
+            
+        except Exception as e:
+            logger.warning(f"Failed to create PDF previews: {e}")
+        
+        return target_path
+    
+    def _resize_if_needed(self, img: Image.Image) -> Image.Image:
+        """
+        Resize an image if it exceeds the maximum dimension.
+        
+        Args:
+            img: PIL Image to resize
+            
+        Returns:
+            Resized image (or original if no resize needed)
+        """
+        width, height = img.size
+        
+        if width <= MAX_IMAGE_DIMENSION and height <= MAX_IMAGE_DIMENSION:
+            return img
+        
+        # Calculate new dimensions maintaining aspect ratio
+        if width > height:
+            new_width = MAX_IMAGE_DIMENSION
+            new_height = int(height * (MAX_IMAGE_DIMENSION / width))
+        else:
+            new_height = MAX_IMAGE_DIMENSION
+            new_width = int(width * (MAX_IMAGE_DIMENSION / height))
+        
+        return img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    def _ensure_absolute(self, path_str: str) -> Path:
+        path = Path(path_str)
+        if path.is_absolute():
+            return path
+
+        if path.parts and path.parts[0] == self.storage_path.name:
+            return (self.storage_path.parent / path).resolve()
+        if path.parts and path.parts[0] == self.review_path.name:
+            return (self.review_path.parent / path).resolve()
+
+        candidate = (self.storage_path / path).resolve()
+        if candidate.exists():
+            return candidate
+
+        candidate = (self.review_path / path).resolve()
+        return candidate
+
+    def _relative_to_known_base(self, path: Path) -> Path:
+        for base in (self.storage_path, self.review_path):
+            try:
+                return path.relative_to(base)
+            except ValueError:
+                continue
+        return Path(path.name)
+
+    def move_to_review_storage(self, stored_path: str) -> str:
+        return str(self._move_between_bases(stored_path, self.review_path))
+
+    def move_to_final_storage(self, stored_path: str) -> str:
+        return str(self._move_between_bases(stored_path, self.storage_path))
+
+    def _move_between_bases(self, stored_path: str, destination_base: Path) -> Path:
+        source = self._ensure_absolute(stored_path).resolve()
+        if not source.exists():
+            logger.warning("Attempted to move missing file: %s", stored_path)
+            return source
+
+        destination_base = destination_base.resolve()
+
+        try:
+            source.relative_to(destination_base)
+            return source  # already in destination tree
+        except ValueError:
+            pass
+
+        relative = self._relative_to_known_base(source)
+        target_dir = destination_base / relative.parent
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / relative.name
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), target)
+
+        preview_dir = source.parent / f"{source.stem}_previews"
+        if preview_dir.exists():
+            new_preview_parent = target.parent / f"{target.stem}_previews"
+            if new_preview_parent.exists():
+                shutil.rmtree(new_preview_parent)
+            shutil.move(str(preview_dir), new_preview_parent)
+
+        logger.info("Moved %s to %s", stored_path, target)
+        return target
+
+    def get_document_path(self, stored_path: str) -> Optional[Path]:
+        """
+        Get the full path to a stored document.
+        
+        Args:
+            stored_path: Relative or absolute path to the document
+            
+        Returns:
+            Full path to the document or None if not found
+        """
+        path = self._ensure_absolute(stored_path)
+        return path if path.exists() else None
+    
+    def get_preview_paths(self, stored_path: str) -> list[Path]:
+        """
+        Get preview image paths for a PDF document.
+        
+        Args:
+            stored_path: Path to the stored PDF
+            
+        Returns:
+            List of preview image paths
+        """
+        path = Path(stored_path)
+        preview_dir = path.parent / f"{path.stem}_previews"
+        
+        if not preview_dir.exists():
+            return []
+        
+        return sorted(preview_dir.glob("page_*.jpg"))
+    
+    def delete_document(self, stored_path: str) -> bool:
+        """
+        Delete a stored document and its previews.
+        
+        Args:
+            stored_path: Path to the stored document
+            
+        Returns:
+            True if deletion was successful
+        """
+        try:
+            path = self._ensure_absolute(stored_path)
+            
+            # Delete the main file
+            if path.exists():
+                path.unlink()
+            
+            # Delete preview directory if it exists (for PDFs)
+            preview_dir = path.parent / f"{path.stem}_previews"
+            if preview_dir.exists():
+                shutil.rmtree(preview_dir)
+            
+            logger.info(f"Deleted document: {stored_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete document {stored_path}: {e}")
+            return False
+
+
+# Global storage service instance
+storage_service = StorageService()
+

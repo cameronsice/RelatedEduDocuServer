@@ -1,0 +1,30 @@
+Download the Windows installer
+Go to the UB Mannheim build (best Windows version):
+https://github.com/UB-Mannheim/tesseract/wiki
+Under “Download”, grab the latest tesseract-ocr-w64-setup-…exe.
+Run the installer
+Accept defaults unless you want a different folder.
+When prompted for “Additional language data”, you can keep English only (default) or add more languages.
+Add Tesseract to your PATH
+Default install path is C:\Program Files\Tesseract-OCR.
+Open Windows Search → “Environment Variables” → “Edit the system environment variables”.
+Click “Environment Variables…”.
+Under “System variables”, select Path → “Edit” → “New”.
+Paste C:\Program Files\Tesseract-OCR.
+Click OK on each dialog to save.
+Verify installation
+Open a new PowerShell window.
+Run: tesseract --version
+You should see version info. If “command not found” appears, re-check the PATH.
+Install Poppler for PDF support (needed by pdf2image)
+Download from: https://github.com/oschwartz10612/poppler-windows/releases
+Extract, e.g. to C:\poppler
+Add C:\poppler\Library\bin to your PATH using the same steps as above.
+Verify: open PowerShell, run pdfinfo -v. Should show version.
+Restart your server
+Stop the current uvicorn process (Ctrl+C in that terminal).
+Start it again: python -m uvicorn app.main:app --reload
+This ensures the app sees Tesseract/Poppler on PATH.
+Test OCR
+Upload a sample scanned image (JPG/PNG) via http://127.0.0.1:8000.
+Check logs for Extracted … characters messages, and confirm the document details populate.

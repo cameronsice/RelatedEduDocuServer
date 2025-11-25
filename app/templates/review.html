@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Review Queue - Education Document Server{% endblock %}
+
+{% block content %}
+<div class="review-page">
+    <header class="page-header">
+        <h1>Manual Review Queue</h1>
+        <p class="subtitle">Documents that still need verification</p>
+    </header>
+
+    <div class="review-panel">
+        <div class="review-info">
+            <p>Documents enter this queue when the OCR/AI step misses required fields or reports low confidence. Open each record, fill in the missing data, and save changes to remove it from the queue automatically.</p>
+            <button id="refresh-queue" class="btn btn-secondary btn-small">Refresh</button>
+        </div>
+
+        <div class="documents-table-container">
+            <table class="documents-table">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Course</th>
+                        <th>Assignment</th>
+                        <th>Reason</th>
+                        <th>Confidence</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="review-body">
+                    <tr>
+                        <td colspan="7" style="text-align:center;">Loading…</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div id="review-empty" class="empty-state hidden">
+            <div class="empty-icon">✅</div>
+            <h3>All documents look good</h3>
+            <p>No items require manual review right now.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tbody = document.getElementById('review-body');
+    const emptyState = document.getElementById('review-empty');
+    const refreshBtn = document.getElementById('refresh-queue');
+
+    async function loadQueue() {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Loading…</td></tr>';
+        emptyState.classList.add('hidden');
+        try {
+            const response = await fetch('/api/documents/review-queue?page=1&page_size=100');
+            const data = await response.json();
+
+            if (!data.documents.length) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            tbody.innerHTML = '';
+            data.documents.forEach(doc => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${doc.student_name || '—'}</td>
+                    <td>${doc.course_name || '—'}</td>
+                    <td>${doc.assignment_name || '—'}</td>
+                    <td><span class="review-badge">${doc.review_reason || 'Unknown reason'}</span></td>
+                    <td>${doc.extraction_confidence !== null ? doc.extraction_confidence.toFixed(2) : '—'}</td>
+                    <td>${doc.updated_at ? new Date(doc.updated_at).toLocaleString() : '—'}</td>
+                    <td class="cell-actions">
+                        <a href="/documents/${doc.id}" class="btn btn-small">Review</a>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (error) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-danger);">Failed to load review queue.</td></tr>';
+        }
+    }
+
+    refreshBtn.addEventListener('click', loadQueue);
+    loadQueue();
+});
+</script>
+{% endblock %}
+

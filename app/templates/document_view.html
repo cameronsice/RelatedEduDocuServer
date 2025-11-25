@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}{{ document.student_name or 'Document' }} - Education Document Server{% endblock %}
+
+{% block content %}
+<div class="document-page">
+    {% if error %}
+    <div class="error-state">
+        <div class="error-icon">⚠️</div>
+        <h2>{{ error }}</h2>
+        <a href="/" class="btn btn-primary">Back to Dashboard</a>
+    </div>
+    {% else %}
+    <header class="page-header document-header">
+        <a href="javascript:history.back()" class="back-link">← Back</a>
+        <h1>Document Details</h1>
+    </header>
+
+    <div class="document-layout">
+        <div class="document-preview-section">
+            <div class="preview-container">
+                <img id="preview-image" src="/api/documents/{{ document.id }}/preview/1" alt="Document Preview">
+            </div>
+            {% if num_pages > 1 %}
+            <div class="preview-pagination">
+                <button id="prev-preview" class="btn btn-secondary" disabled>← Prev</button>
+                <span id="preview-page-info">Page 1 of {{ num_pages }}</span>
+                <button id="next-preview" class="btn btn-secondary">Next →</button>
+            </div>
+            {% endif %}
+            <div class="preview-actions">
+                <a href="/api/documents/{{ document.id }}/file" class="btn btn-primary" download>
+                    Download Original
+                </a>
+            </div>
+        </div>
+
+        <div class="document-details-section">
+            <div class="alert {% if document.requires_review %}alert-warning{% else %}alert-success{% endif %}">
+                {% if document.requires_review %}
+                <strong>Needs Review:</strong> {{ document.review_reason or 'Missing required data' }}
+                {% else %}
+                <strong>Approved:</strong> All required fields are present.
+                {% endif %}
+            </div>
+            <form id="edit-form" class="details-form">
+                <div class="form-group">
+                    <label for="student_name">Student Name</label>
+                    <input type="text" id="student_name" name="student_name" value="{{ document.student_name or '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="course_name">Course Name</label>
+                    <input type="text" id="course_name" name="course_name" value="{{ document.course_name or '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="assignment_name">Assignment Name</label>
+                    <input type="text" id="assignment_name" name="assignment_name" value="{{ document.assignment_name or '' }}">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="grade">Grade</label>
+                        <input type="text" id="grade" name="grade" value="{{ document.grade or '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="document_date">Date</label>
+                        <input type="date" id="document_date" name="document_date" value="{{ document.document_date.strftime('%Y-%m-%d') if document.document_date else '' }}">
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <button type="button" id="delete-btn" class="btn btn-danger">Delete Document</button>
+                </div>
+            </form>
+
+            <div class="ocr-section">
+                <h3>Extracted Text (OCR)</h3>
+                <div class="ocr-text">{{ document.ocr_text or 'No text extracted' }}</div>
+            </div>
+
+            <div class="metadata-section">
+                <h3>File Information</h3>
+                <dl class="metadata-list">
+                    <dt>Original Filename</dt>
+                    <dd>{{ document.original_filename }}</dd>
+                    <dt>Uploaded</dt>
+                    <dd>{{ document.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                    <dt>Last Modified</dt>
+                    <dd>{{ document.updated_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+{% if not error %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const documentId = '{{ document.id }}';
+    const numPages = {{ num_pages }};
+    let currentPreviewPage = 1;
+
+    // Preview pagination
+    const previewImage = document.getElementById('preview-image');
+    const prevPreview = document.getElementById('prev-preview');
+    const nextPreview = document.getElementById('next-preview');
+    const pageInfo = document.getElementById('preview-page-info');
+
+    if (prevPreview && nextPreview) {
+        prevPreview.addEventListener('click', () => {
+            if (currentPreviewPage > 1) {
+                currentPreviewPage--;
+                updatePreview();
+            }
+        });
+
+        nextPreview.addEventListener('click', () => {
+            if (currentPreviewPage < numPages) {
+                currentPreviewPage++;
+                updatePreview();
+            }
+        });
+    }
+
+    function updatePreview() {
+        previewImage.src = `/api/documents/${documentId}/preview/${currentPreviewPage}`;
+        if (pageInfo) pageInfo.textContent = `Page ${currentPreviewPage} of ${numPages}`;
+        if (prevPreview) prevPreview.disabled = currentPreviewPage <= 1;
+        if (nextPreview) nextPreview.disabled = currentPreviewPage >= numPages;
+    }
+
+    // Edit form
+    const editForm = document.getElementById('edit-form');
+    editForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData(editForm);
+        const data = {};
+        formData.forEach((value, key) => {
+            if (value) data[key] = value;
+        });
+
+        try {
+            const response = await fetch(`/api/documents/${documentId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                showNotification('Document updated successfully', 'success');
+            } else {
+                showNotification('Failed to update document', 'error');
+            }
+        } catch (error) {
+            showNotification('Error: ' + error.message, 'error');
+        }
+    });
+
+    // Delete button
+    const deleteBtn = document.getElementById('delete-btn');
+    deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/documents/${documentId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                window.location.href = '/';
+            } else {
+                showNotification('Failed to delete document', 'error');
+            }
+        } catch (error) {
+            showNotification('Error: ' + error.message, 'error');
+        }
+    });
+
+    function showNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+            notification.classList.add('fade-out');
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+});
+</script>
+{% endif %}
+{% endblock %}
+

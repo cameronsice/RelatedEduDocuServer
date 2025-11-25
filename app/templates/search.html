@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Education Document Server{% endblock %}
+
+{% block content %}
+<div class="search-page">
+    <header class="page-header">
+        <h1>Search Documents</h1>
+        <p class="subtitle">Find documents by student, course, assignment, or date</p>
+    </header>
+
+    <div class="search-container">
+        <form id="search-form" class="search-form">
+            <div class="search-main">
+                <input type="text" id="query" name="query" placeholder="Search by any keyword..." class="search-input">
+                <button type="submit" class="btn btn-primary search-btn">Search</button>
+            </div>
+
+            <div class="search-filters">
+                <div class="filter-group">
+                    <label for="student_name">Student</label>
+                    <input type="text" id="student_name" name="student_name" placeholder="Student name..." list="students-list">
+                    <datalist id="students-list"></datalist>
+                </div>
+                <div class="filter-group">
+                    <label for="course_name">Course</label>
+                    <input type="text" id="course_name" name="course_name" placeholder="Course name..." list="courses-list">
+                    <datalist id="courses-list"></datalist>
+                </div>
+                <div class="filter-group">
+                    <label for="assignment_name">Assignment</label>
+                    <input type="text" id="assignment_name" name="assignment_name" placeholder="Assignment name...">
+                </div>
+                <div class="filter-group">
+                    <label for="date_from">Date From</label>
+                    <input type="date" id="date_from" name="date_from">
+                </div>
+                <div class="filter-group">
+                    <label for="date_to">Date To</label>
+                    <input type="date" id="date_to" name="date_to">
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="results-container">
+        <div class="results-header">
+            <h2>Results</h2>
+            <span id="results-count" class="results-count"></span>
+        </div>
+
+        <div id="results-loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Searching...</span>
+        </div>
+
+        <div id="results-empty" class="empty-state hidden">
+            <div class="empty-icon">🔍</div>
+            <h3>No Results Found</h3>
+            <p>Try adjusting your search criteria</p>
+        </div>
+
+        <div id="results-grid" class="documents-grid"></div>
+
+        <div id="pagination" class="pagination hidden">
+            <button id="prev-page" class="btn btn-secondary" disabled>← Previous</button>
+            <span id="page-info" class="page-info"></span>
+            <button id="next-page" class="btn btn-secondary">Next →</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchForm = document.getElementById('search-form');
+    const resultsGrid = document.getElementById('results-grid');
+    const resultsLoading = document.getElementById('results-loading');
+    const resultsEmpty = document.getElementById('results-empty');
+    const resultsCount = document.getElementById('results-count');
+    const pagination = document.getElementById('pagination');
+    const prevPage = document.getElementById('prev-page');
+    const nextPage = document.getElementById('next-page');
+    const pageInfo = document.getElementById('page-info');
+
+    let currentPage = 1;
+    const pageSize = 20;
+
+    // Load students and courses for autocomplete
+    loadAutocomplete();
+
+    // Initial search
+    performSearch();
+
+    searchForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        currentPage = 1;
+        performSearch();
+    });
+
+    prevPage.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            performSearch();
+        }
+    });
+
+    nextPage.addEventListener('click', () => {
+        currentPage++;
+        performSearch();
+    });
+
+    async function loadAutocomplete() {
+        try {
+            const [studentsRes, coursesRes] = await Promise.all([
+                fetch('/api/search/students'),
+                fetch('/api/search/courses')
+            ]);
+
+            const students = await studentsRes.json();
+            const courses = await coursesRes.json();
+
+            const studentsList = document.getElementById('students-list');
+            const coursesList = document.getElementById('courses-list');
+
+            students.students.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s;
+                studentsList.appendChild(opt);
+            });
+
+            courses.courses.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                coursesList.appendChild(opt);
+            });
+        } catch (error) {
+            console.error('Failed to load autocomplete:', error);
+        }
+    }
+
+    async function performSearch() {
+        resultsLoading.classList.remove('hidden');
+        resultsEmpty.classList.add('hidden');
+        resultsGrid.innerHTML = '';
+
+        const formData = new FormData(searchForm);
+        const params = new URLSearchParams();
+
+        formData.forEach((value, key) => {
+            if (value) params.append(key, value);
+        });
+
+        params.append('page', currentPage);
+        params.append('page_size', pageSize);
+
+        try {
+            const response = await fetch(`/api/search?${params}`);
+            const data = await response.json();
+
+            resultsLoading.classList.add('hidden');
+
+            if (data.documents.length === 0) {
+                resultsEmpty.classList.remove('hidden');
+                pagination.classList.add('hidden');
+                resultsCount.textContent = '';
+                return;
+            }
+
+            resultsCount.textContent = `${data.total} document${data.total !== 1 ? 's' : ''} found`;
+
+            data.documents.forEach(doc => {
+                const card = createDocumentCard(doc);
+                resultsGrid.appendChild(card);
+            });
+
+            // Update pagination
+            const totalPages = Math.ceil(data.total / pageSize);
+            pagination.classList.toggle('hidden', totalPages <= 1);
+            prevPage.disabled = currentPage <= 1;
+            nextPage.disabled = currentPage >= totalPages;
+            pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+
+        } catch (error) {
+            resultsLoading.classList.add('hidden');
+            alert('Search failed: ' + error.message);
+        }
+    }
+
+    function createDocumentCard(doc) {
+        const card = document.createElement('a');
+        card.href = `/documents/${doc.id}`;
+        card.className = 'document-card';
+
+        const reviewBadge = doc.requires_review
+            ? `<span class="review-badge">Needs Review</span>`
+            : '';
+
+        card.innerHTML = `
+            <div class="card-preview">
+                <img src="/api/documents/${doc.id}/preview/1" alt="Preview" onerror="this.src='/static/images/no-preview.svg'">
+            </div>
+            <div class="card-content">
+                <h3 class="card-title">${doc.student_name || 'Unknown Student'}</h3>
+                <p class="card-course">${doc.course_name || 'Unknown Course'}</p>
+                <p class="card-assignment">${doc.assignment_name || 'Unknown Assignment'}</p>
+                <div class="card-meta">
+                    ${doc.grade ? `<span class="grade-badge">${doc.grade}</span>` : ''}
+                    ${reviewBadge}
+                    <span class="card-date">${doc.document_date || ''}</span>
+                </div>
+            </div>
+        `;
+
+        return card;
+    }
+});
+</script>
+{% endblock %}
+
