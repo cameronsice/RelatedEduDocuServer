@@ -61,6 +61,20 @@
 
                 <div class="form-row">
                     <div class="form-group">
+                        <label for="document_type">Document type</label>
+                        <select id="document_type" name="document_type">
+                            <option value="poe" {% if document.document_type == 'poe' or not document.document_type %}selected{% endif %}>POE (Grade Books)</option>
+                            <option value="certificate" {% if document.document_type == 'certificate' %}selected{% endif %}>Certificate</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="student_id">Student ID</label>
+                        <input type="text" id="student_id" name="student_id" value="{{ document.student_id or '' }}" placeholder="13-digit ID" maxlength="20">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
                         <label for="grade">Grade</label>
                         <input type="text" id="grade" name="grade" value="{{ document.grade or '' }}">
                     </div>
@@ -144,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = new FormData(editForm);
         const data = {};
         formData.forEach((value, key) => {
-            if (value) data[key] = value;
+            data[key] = value || null;
         });
 
         try {

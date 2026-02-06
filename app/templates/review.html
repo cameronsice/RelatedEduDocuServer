@@ -22,6 +22,7 @@
                         <th>Student</th>
                         <th>Course</th>
                         <th>Assignment</th>
+                        <th>Type</th>
                         <th>Reason</th>
                         <th>Confidence</th>
                         <th>Updated</th>
@@ -30,7 +31,7 @@
                 </thead>
                 <tbody id="review-body">
                     <tr>
-                        <td colspan="7" style="text-align:center;">Loading…</td>
+                        <td colspan="8" style="text-align:center;">Loading…</td>
                     </tr>
                 </tbody>
             </table>
@@ -53,7 +54,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const refreshBtn = document.getElementById('refresh-queue');
 
     async function loadQueue() {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Loading…</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Loading…</td></tr>';
         emptyState.classList.add('hidden');
         try {
             const response = await fetch('/api/documents/review-queue?page=1&page_size=100');
@@ -66,12 +67,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             tbody.innerHTML = '';
+            const typeLabel = (t) => (t === 'certificate' ? 'Certificate' : 'POE');
             data.documents.forEach(doc => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${doc.student_name || '—'}</td>
                     <td>${doc.course_name || '—'}</td>
                     <td>${doc.assignment_name || '—'}</td>
+                    <td>${typeLabel(doc.document_type || 'poe')}</td>
                     <td><span class="review-badge">${doc.review_reason || 'Unknown reason'}</span></td>
                     <td>${doc.extraction_confidence !== null ? doc.extraction_confidence.toFixed(2) : '—'}</td>
                     <td>${doc.updated_at ? new Date(doc.updated_at).toLocaleString() : '—'}</td>
@@ -82,7 +85,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tbody.appendChild(tr);
             });
         } catch (error) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-danger);">Failed to load review queue.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--color-danger);">Failed to load review queue.</td></tr>';
         }
     }
 

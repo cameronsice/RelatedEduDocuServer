@@ -58,6 +58,7 @@
                         <th>Student</th>
                         <th>Course</th>
                         <th>Assignment</th>
+                        <th>Type</th>
                         <th>Grade</th>
                         <th>Date</th>
                         <th>Status</th>
@@ -70,6 +71,7 @@
                         <td class="cell-student">{{ doc.student_name or '—' }}</td>
                         <td class="cell-course">{{ doc.course_name or '—' }}</td>
                         <td class="cell-assignment">{{ doc.assignment_name or '—' }}</td>
+                        <td class="cell-type">{{ (doc.document_type or 'poe')|replace('poe', 'POE')|replace('certificate', 'Certificate') }}</td>
                         <td class="cell-grade">
                             {% if doc.grade %}
                             <span class="grade-badge">{{ doc.grade }}</span>
@@ -108,6 +110,13 @@
             <h2>Upload Document</h2>
         </div>
         <form id="upload-form" class="upload-form" enctype="multipart/form-data">
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label for="upload-document-type">Document type</label>
+                <select id="upload-document-type" name="document_type" class="search-input" style="max-width: 280px;">
+                    <option value="poe" selected>POE (Grade Books)</option>
+                    <option value="certificate">Certificates</option>
+                </select>
+            </div>
             <div class="upload-dropzone" id="dropzone">
                 <div class="dropzone-content">
                     <span class="dropzone-icon">📤</span>
@@ -186,6 +195,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function uploadFile(file) {
         const formData = new FormData();
         formData.append('file', file);
+        const docTypeSelect = document.getElementById('upload-document-type');
+        if (docTypeSelect) formData.append('document_type', docTypeSelect.value);
 
         uploadProgress.classList.remove('hidden');
         dropzone.classList.add('uploading');

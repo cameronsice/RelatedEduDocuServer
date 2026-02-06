@@ -4,6 +4,7 @@ import logging
 import shutil
 import uuid
 from datetime import datetime
+import re
 from pathlib import Path
 from typing import Tuple, Optional
 
@@ -173,6 +174,95 @@ class StorageService:
             new_width = int(width * (MAX_IMAGE_DIMENSION / height))
         
         return img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    def _sanitize_filename_part(self, s: Optional[str], max_len: int = 80) -> str:
+        """
+        Make a string safe for use as a filename segment.
+        Replaces spaces and unsafe chars with underscore, strips, truncates.
+        """
+        if not s or not str(s).strip():
+            return "Unknown"
+        # Replace spaces, slashes, backslashes, and other problematic chars with single underscore
+        out = re.sub(r"[\s/\\<>:\"|?*\x00-\x1f]+", "_", str(s).strip())
+        out = out.strip("._ ")
+        if not out:
+            return "Unknown"
+        return out[:max_len] if len(out) > max_len else out
+
+    def rename_to_descriptive(
+        self,
+        stored_path: str,
+        student_name: Optional[str] = None,
+        course_name: Optional[str] = None,
+        document_type: Optional[str] = None,
+        student_id: Optional[str] = None,
+    ) -> str:
+        """
+        Rename a stored file to a descriptive name: StudentName_CourseName_Type_Last4.ext.
+        Handles uniqueness by appending _1, _2, ... if the name already exists.
+        Returns the new stored path (same format as input: relative or absolute).
+        """
+        path = self._ensure_absolute(stored_path)
+        if not path.exists():
+            logger.warning("Cannot rename missing file: %s", stored_path)
+            return stored_path
+
+        ext = path.suffix or ""
+        last4 = "XXXX"
+        if student_id and len(str(student_id).strip()) >= 4:
+            last4 = str(student_id).strip()[-4:]
+
+        type_part = (document_type or "poe").strip().lower()
+        if type_part not in ("poe", "certificate"):
+            type_part = "poe"
+
+        parts = [
+            self._sanitize_filename_part(student_name),
+            self._sanitize_filename_part(course_name),
+            type_part,
+            last4,
+        ]
+        base_name = "_".join(parts)
+        # Cap total base name length to avoid filesystem issues (e.g. 200 chars)
+        if len(base_name) > 200:
+            base_name = base_name[:200].rstrip("_")
+
+        target_dir = path.parent
+        candidate_stem = base_name
+        counter = 0
+        while True:
+            new_name = f"{candidate_stem}{ext}"
+            target_file = target_dir / new_name
+            if not target_file.exists():
+                break
+            counter += 1
+            candidate_stem = f"{base_name}_{counter}"
+
+        # Rename main file
+        target_file = target_dir / f"{candidate_stem}{ext}"
+        path.rename(target_file)
+
+        # Rename preview directory if present (PDFs)
+        old_preview_dir = path.parent / f"{path.stem}_previews"
+        if old_preview_dir.exists():
+            new_preview_dir = target_file.parent / f"{target_file.stem}_previews"
+            if new_preview_dir.exists():
+                shutil.rmtree(new_preview_dir)
+            shutil.move(str(old_preview_dir), str(new_preview_dir))
+
+        # Return path in same style as input (relative from storage base if input was relative)
+        try:
+            rel = target_file.relative_to(self.storage_path)
+            result = str(rel)
+        except ValueError:
+            try:
+                rel = target_file.relative_to(self.review_path)
+                result = str(rel)
+            except ValueError:
+                result = str(target_file)
+
+        logger.info("Renamed document to descriptive name: %s", result)
+        return result
     
     def _ensure_absolute(self, path_str: str) -> Path:
         path = Path(path_str)
@@ -258,14 +348,14 @@ class StorageService:
             stored_path: Path to the stored PDF
             
         Returns:
-            List of preview image paths
+            List of absolute preview image paths
         """
-        path = Path(stored_path)
+        path = self._ensure_absolute(stored_path)
+        if not path.exists():
+            return []
         preview_dir = path.parent / f"{path.stem}_previews"
-        
         if not preview_dir.exists():
             return []
-        
         return sorted(preview_dir.glob("page_*.jpg"))
     
     def delete_document(self, stored_path: str) -> bool:

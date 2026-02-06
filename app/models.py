@@ -19,6 +19,8 @@ class Document(Base):
     assignment_name = Column(String(255), nullable=True, index=True)
     grade = Column(String(50), nullable=True)
     document_date = Column(Date, nullable=True)
+    document_type = Column(String(50), nullable=True, default="poe")
+    student_id = Column(String(20), nullable=True, index=True)
     original_filename = Column(String(500), nullable=False)
     stored_path = Column(String(1000), nullable=False)
     ocr_text = Column(Text, nullable=True)

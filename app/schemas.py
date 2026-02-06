@@ -13,6 +13,8 @@ class DocumentBase(BaseModel):
     assignment_name: Optional[str] = None
     grade: Optional[str] = None
     document_date: Optional[date] = None
+    document_type: Optional[str] = None
+    student_id: Optional[str] = None
 
 
 class DocumentCreate(DocumentBase):
@@ -61,6 +63,7 @@ class SearchQuery(BaseModel):
     student_name: Optional[str] = None
     course_name: Optional[str] = None
     assignment_name: Optional[str] = None
+    student_id: Optional[str] = None
     date_from: Optional[date] = None
     date_to: Optional[date] = None
     page: int = Field(default=1, ge=1)
@@ -74,5 +77,6 @@ class ExtractedFields(BaseModel):
     assignment_name: Optional[str] = None
     grade: Optional[str] = None
     document_date: Optional[str] = None
+    student_id: Optional[str] = None
     confidence: float = 0.0
 

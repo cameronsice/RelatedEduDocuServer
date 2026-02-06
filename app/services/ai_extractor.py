@@ -24,6 +24,7 @@ Given the OCR text from a scanned student document, extract the following fields
 3. assignment_name: The name or title of the assignment, test, or exercise
 4. grade: The grade or score received (e.g., "A", "85%", "42/50")
 5. document_date: The date on the document (in YYYY-MM-DD format if possible)
+6. student_id: A 13-digit government/ID number if present (e.g. 0501015513085 or 8711115189080). Omit if not found.
 
 If a field cannot be determined from the text, set it to null.
 Also provide a confidence score from 0.0 to 1.0 indicating how confident you are in the extractions.
@@ -35,6 +36,7 @@ Respond ONLY with a JSON object in this exact format:
     "assignment_name": "string or null",
     "grade": "string or null",
     "document_date": "YYYY-MM-DD or null",
+    "student_id": "13 digits or null",
     "confidence": 0.0
 }
 

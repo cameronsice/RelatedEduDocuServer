@@ -23,6 +23,7 @@ def search_documents(
     student_name: Optional[str] = Query(None, description="Filter by student name"),
     course_name: Optional[str] = Query(None, description="Filter by course name"),
     assignment_name: Optional[str] = Query(None, description="Filter by assignment name"),
+    student_id: Optional[str] = Query(None, description="Filter by student ID"),
     date_from: Optional[date] = Query(None, description="Filter from date"),
     date_to: Optional[date] = Query(None, description="Filter to date"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -46,6 +47,7 @@ def search_documents(
                 Document.student_name.ilike(search_pattern),
                 Document.course_name.ilike(search_pattern),
                 Document.assignment_name.ilike(search_pattern),
+                Document.student_id.ilike(search_pattern),
                 Document.ocr_text.ilike(search_pattern)
             )
         )
@@ -59,6 +61,9 @@ def search_documents(
     
     if assignment_name:
         filters.append(Document.assignment_name.ilike(f"%{assignment_name}%"))
+    
+    if student_id:
+        filters.append(Document.student_id.ilike(f"%{student_id}%"))
     
     # Date range filters
     if date_from:

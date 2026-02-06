@@ -54,4 +54,30 @@ def init_db():
                 "WHERE requires_review IS NULL"
             )
         )
+        conn.execute(
+            text(
+                "ALTER TABLE documents "
+                "ADD COLUMN IF NOT EXISTS document_type VARCHAR(50)"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE documents "
+                "ADD COLUMN IF NOT EXISTS student_id VARCHAR(20)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_documents_student_id "
+                "ON documents (student_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE documents "
+                "SET document_type = 'poe' "
+                "WHERE document_type IS NULL"
+            )
+        )
+        conn.commit()
 
