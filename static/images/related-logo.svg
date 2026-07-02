@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 150" role="img" aria-label="Related">
+  <!-- Mark -->
+  <g transform="translate(50 2)">
+    <circle cx="59" cy="62" r="27" fill="#C7E6F5"/>
+    <circle cx="60" cy="60" r="45" fill="none" stroke="#2F9BD4" stroke-width="13"
+            stroke-linecap="round" stroke-dasharray="250 33" transform="rotate(-6 60 60)"/>
+    <circle cx="97" cy="41" r="6.5" fill="#2F9BD4"/>
+  </g>
+  <!-- Wordmark (approximation of the Related lettering; replace with official artwork if available) -->
+  <text x="110" y="140" text-anchor="middle"
+        font-family="'Trebuchet MS','DM Sans',Verdana,sans-serif"
+        font-size="34" font-weight="700" font-style="italic"
+        letter-spacing="1.5" fill="#A14E3A">RELATED</text>
+</svg>

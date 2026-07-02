@@ -17,8 +17,9 @@ from app.config import (
     SCAN_REVIEW_HOLD_PATH,
 )
 from app.database import init_db, get_db, SessionLocal
-from app.routers import documents, search
+from app.routers import documents, search, document_types, settings as settings_router
 from app.services.file_watcher import file_watcher_service
+from app.services.document_types import document_type_service
 from app.routers.documents import process_document
 
 # Configure logging
@@ -82,7 +83,15 @@ async def lifespan(app: FastAPI):
     # Initialize database
     init_db()
     logger.info("Database initialized")
-    
+
+    # Seed default document types (idempotent, additive)
+    seed_db = SessionLocal()
+    try:
+        document_type_service.seed_defaults(seed_db)
+    finally:
+        seed_db.close()
+    logger.info("Document types ready")
+
     # Set up file watcher
     file_watcher_service.set_process_callback(document_processor)
     
@@ -117,6 +126,8 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # Include routers
 app.include_router(documents.router)
 app.include_router(search.router)
+app.include_router(document_types.router)
+app.include_router(settings_router.router)
 
 
 # Web UI Routes
@@ -131,9 +142,9 @@ async def home(request: Request):
         review_count = db.query(Document).filter(Document.requires_review.is_(True)).count()
         
         return templates.TemplateResponse(
+            request,
             "index.html",
             {
-                "request": request,
                 "recent_documents": recent_docs,
                 "total_documents": total_docs,
                 "review_count": review_count
@@ -147,8 +158,9 @@ async def home(request: Request):
 async def search_page(request: Request):
     """Search page."""
     return templates.TemplateResponse(
+        request,
         "search.html",
-        {"request": request}
+        {}
     )
 
 
@@ -156,8 +168,19 @@ async def search_page(request: Request):
 async def review_page(request: Request):
     """Manual review queue page."""
     return templates.TemplateResponse(
+        request,
         "review.html",
-        {"request": request}
+        {}
+    )
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """Settings page (document types manager)."""
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {}
     )
 
 
@@ -174,8 +197,9 @@ async def view_document(request: Request, document_id: str):
         
         if not document:
             return templates.TemplateResponse(
+                request,
                 "document_view.html",
-                {"request": request, "document": None, "error": "Document not found"}
+                {"document": None, "error": "Document not found"}
             )
         
         # Get number of pages for PDFs
@@ -184,13 +208,18 @@ async def view_document(request: Request, document_id: str):
             from app.services.storage import storage_service
             previews = storage_service.get_preview_paths(document.stored_path)
             num_pages = len(previews) if previews else 1
-        
+
+        # Custom (type-specific) field values for prefilling the form
+        from app.services.field_values import get_values
+        custom_values = get_values(db, document.id)
+
         return templates.TemplateResponse(
+            request,
             "document_view.html",
             {
-                "request": request,
                 "document": document,
                 "num_pages": num_pages,
+                "custom_values": custom_values,
                 "error": None
             }
         )

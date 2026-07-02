@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Related">
+  <!-- Inner pale-blue disc -->
+  <circle cx="59" cy="62" r="27" fill="#C7E6F5"/>
+  <!-- Open brushstroke ring (gap toward top-right, like the Related enso mark) -->
+  <circle cx="60" cy="60" r="45" fill="none" stroke="#2F9BD4" stroke-width="13"
+          stroke-linecap="round" stroke-dasharray="250 33" transform="rotate(-6 60 60)"/>
+  <!-- Brush terminal / hook near the opening -->
+  <circle cx="97" cy="41" r="6.5" fill="#2F9BD4"/>
+</svg>

@@ -71,3 +71,6 @@ logs/
 temp/
 tmp/
 
+
+# Claude Code local workspace config
+.claude/

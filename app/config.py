@@ -54,6 +54,12 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", 8000))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
+# External tool paths (optional). When set, the app points pytesseract /
+# pdf2image directly at these binaries instead of relying on PATH — useful on
+# Windows where PATH changes don't reach an already-running server process.
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "").strip()
+POPPLER_PATH = os.getenv("POPPLER_PATH", "").strip() or None
+
 # Supported file extensions for scanning
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp"}
 

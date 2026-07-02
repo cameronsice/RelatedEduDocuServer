@@ -8,16 +8,19 @@ import pytesseract
 from PIL import Image
 from pdf2image import convert_from_path
 
-from app.config import SUPPORTED_EXTENSIONS
+from app.config import SUPPORTED_EXTENSIONS, TESSERACT_CMD, POPPLER_PATH
 
 logger = logging.getLogger(__name__)
 
 
 class OCRService:
     """Service for performing OCR on scanned documents."""
-    
+
     def __init__(self):
         """Initialize the OCR service."""
+        # Point pytesseract at the configured binary (Windows / non-PATH setups)
+        if TESSERACT_CMD:
+            pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
         # Verify Tesseract is available
         try:
             pytesseract.get_tesseract_version()
@@ -25,29 +28,31 @@ class OCRService:
         except Exception as e:
             logger.warning(f"Tesseract OCR may not be properly installed: {e}")
     
-    def extract_text(self, file_path: Path) -> Optional[str]:
+    def extract_text(self, file_path: Path, max_pages: Optional[int] = None) -> Optional[str]:
         """
         Extract text from a document file.
-        
+
         Args:
             file_path: Path to the document file (PDF or image)
-            
+            max_pages: For PDFs, only OCR the first N pages (caps cost and the
+                amount of a document that is processed). None = all pages.
+
         Returns:
             Extracted text or None if extraction failed
         """
         if not file_path.exists():
             logger.error(f"File not found: {file_path}")
             return None
-        
+
         suffix = file_path.suffix.lower()
-        
+
         if suffix not in SUPPORTED_EXTENSIONS:
             logger.error(f"Unsupported file type: {suffix}")
             return None
-        
+
         try:
             if suffix == ".pdf":
-                return self._extract_from_pdf(file_path)
+                return self._extract_from_pdf(file_path, max_pages)
             else:
                 return self._extract_from_image(file_path)
         except Exception as e:
@@ -77,20 +82,25 @@ class OCRService:
         logger.info(f"Extracted {len(text)} characters from {image_path}")
         return text.strip()
     
-    def _extract_from_pdf(self, pdf_path: Path) -> str:
+    def _extract_from_pdf(self, pdf_path: Path, max_pages: Optional[int] = None) -> str:
         """
         Extract text from a PDF file by converting pages to images.
-        
+
         Args:
             pdf_path: Path to the PDF file
-            
+            max_pages: Only OCR the first N pages when set.
+
         Returns:
-            Extracted text from all pages
+            Extracted text from the processed pages
         """
-        logger.info(f"Extracting text from PDF: {pdf_path}")
-        
-        # Convert PDF pages to images
-        pages = convert_from_path(pdf_path, dpi=300)
+        logger.info(f"Extracting text from PDF: {pdf_path} (max_pages={max_pages})")
+
+        # Convert PDF pages to images (limited to the first N pages if requested)
+        convert_kwargs = {"dpi": 300, "poppler_path": POPPLER_PATH}
+        if max_pages and max_pages > 0:
+            convert_kwargs["first_page"] = 1
+            convert_kwargs["last_page"] = max_pages
+        pages = convert_from_path(pdf_path, **convert_kwargs)
         
         all_text = []
         for i, page in enumerate(pages):

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Education Document Server{% endblock %}
+{% block title %}Dashboard - Related Document Server{% endblock %}
 
 {% block content %}
 <div class="dashboard">
@@ -133,6 +133,24 @@
             </div>
         </form>
     </section>
+
+    <section class="upload-section">
+        <div class="section-header">
+            <h2>Bulk Upload</h2>
+        </div>
+        <p class="field-hint" style="margin-bottom: 1rem;">
+            Select multiple files (mixed types are fine). Each is processed one at a time and the type is auto-identified.
+        </p>
+        <div class="upload-dropzone" id="bulk-dropzone">
+            <div class="dropzone-content">
+                <span class="dropzone-icon">🗂️</span>
+                <p class="dropzone-text">Drag &amp; drop multiple documents here or click to browse</p>
+                <p class="dropzone-hint">Supports PDF, PNG, JPG, TIFF</p>
+            </div>
+            <input type="file" id="bulk-file-input" accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.bmp" multiple hidden>
+        </div>
+        <div id="bulk-queue" class="bulk-queue hidden"></div>
+    </section>
 </div>
 {% endblock %}
 
@@ -142,6 +160,27 @@ document.addEventListener('DOMContentLoaded', function() {
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('file-input');
     const uploadProgress = document.getElementById('upload-progress');
+
+    // Populate the document type dropdown from configured types
+    // (falls back to the static options if the request fails).
+    (async () => {
+        try {
+            const res = await fetch('/api/document-types');
+            const data = await res.json();
+            const select = document.getElementById('upload-document-type');
+            if (select && data.document_types && data.document_types.length) {
+                select.innerHTML = '';
+                data.document_types.forEach((t) => {
+                    const opt = document.createElement('option');
+                    opt.value = t.key;
+                    opt.textContent = t.label;
+                    select.appendChild(opt);
+                });
+            }
+        } catch (err) {
+            /* keep static fallback options */
+        }
+    })();
 
     dropzone.addEventListener('click', () => fileInput.click());
 
@@ -218,6 +257,98 @@ document.addEventListener('DOMContentLoaded', function() {
         } finally {
             uploadProgress.classList.add('hidden');
             dropzone.classList.remove('uploading');
+        }
+    }
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const dropzone = document.getElementById('bulk-dropzone');
+    const input = document.getElementById('bulk-file-input');
+    const queueEl = document.getElementById('bulk-queue');
+    if (!dropzone) return;
+
+    const STAGES = ['upload', 'identify', 'ocr', 'ai', 'done'];
+    const LABELS = { upload: 'Uploading', identify: 'Identify', ocr: 'OCR Reading', ai: 'AI Reading', done: 'Done' };
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function pills(activeIdx) {
+        return STAGES.map((s, i) => {
+            let cls = 'pill';
+            if (i < activeIdx) cls += ' pill-done';
+            else if (i === activeIdx) cls += ' pill-active';
+            return `<span class="${cls}">${LABELS[s]}</span>`;
+        }).join('');
+    }
+
+    dropzone.addEventListener('click', () => input.click());
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault(); dropzone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) start([...e.dataTransfer.files]);
+    });
+    input.addEventListener('change', (e) => { if (e.target.files.length) start([...e.target.files]); });
+
+    function start(files) {
+        queueEl.classList.remove('hidden');
+        queueEl.innerHTML = '';
+        files.forEach((f, i) => {
+            const row = document.createElement('div');
+            row.className = 'bulk-row';
+            row.innerHTML = `<div class="bulk-file" title="${esc(f.name)}">${esc(f.name)}</div>
+                <div class="bulk-stages" id="bs-${i}">${pills(-1)}</div>
+                <div class="bulk-result" id="br-${i}">Queued</div>`;
+            queueEl.appendChild(row);
+        });
+        processNext(files, 0);
+    }
+
+    async function processNext(files, idx) {
+        if (idx >= files.length) return;
+        const stagesEl = document.getElementById(`bs-${idx}`);
+        const resultEl = document.getElementById(`br-${idx}`);
+        const setStage = (name) => { stagesEl.innerHTML = pills(Math.max(0, STAGES.indexOf(name))); };
+
+        setStage('upload');
+        resultEl.textContent = 'Processing…';
+        try {
+            const fd = new FormData();
+            fd.append('file', files[idx]);
+            const resp = await fetch('/api/documents/bulk-upload', { method: 'POST', body: fd });
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    const evt = JSON.parse(line);
+                    if (['identify', 'ocr', 'ai'].includes(evt.stage)) {
+                        setStage(evt.stage);
+                    } else if (evt.stage === 'done') {
+                        stagesEl.innerHTML = pills(STAGES.length - 1);
+                        const label = evt.result === 'approved' ? 'Approved' : 'Needs Review';
+                        const cls = evt.result === 'approved' ? 'ok' : 'warn';
+                        const warn = evt.extraction_error ? ' ⚠' : '';
+                        resultEl.innerHTML = `<a class="bulk-badge ${cls}" href="/documents/${evt.document_id}">${label}${warn}</a>`;
+                        if (evt.extraction_error) resultEl.title = evt.extraction_error;
+                    } else if (evt.stage === 'error') {
+                        resultEl.innerHTML = `<span class="bulk-badge err">Error</span>`;
+                        resultEl.title = evt.message || '';
+                    }
+                }
+            }
+        } catch (e) {
+            resultEl.innerHTML = `<span class="bulk-badge err">Error</span>`;
+            resultEl.title = e.message;
+        } finally {
+            processNext(files, idx + 1);  // strictly one at a time
         }
     }
 });

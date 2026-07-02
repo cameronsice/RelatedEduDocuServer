@@ -5,43 +5,39 @@ import re
 import tempfile
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional, List
+import json
+import queue
+import threading
+from typing import Optional, List, Callable
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models import Document
 from app.schemas import DocumentResponse, DocumentUpdate, DocumentListResponse
 from app.services.storage import storage_service
 from app.services.ocr_service import ocr_service
 from app.services.ai_extractor import ai_extractor_service
+from app.services.document_types import document_type_service
+from app.services import field_values
+from app.services.settings import settings_service
+from app.services.rules_extractor import rules_extractor, validate_sa_id
+from app.services.vision_extractor import vision_extractor
 from app.config import SCAN_REVIEW_HOLD_PATH
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-REQUIRED_FIELDS: List[str] = [
-    "course_name",
-    "student_name",
-    "assignment_name",
-    "grade",
-    "document_date",
-]
 CONFIDENCE_THRESHOLD = 0.6
 
-ALLOWED_DOCUMENT_TYPES = ("poe", "certificate")
 
-
-def _normalize_document_type(value: Optional[str]) -> str:
-    """Return 'poe' or 'certificate'; default to 'poe' if invalid."""
-    if not value:
-        return "poe"
-    v = value.strip().lower()
-    return v if v in ALLOWED_DOCUMENT_TYPES else "poe"
+def _normalize_document_type(db: Session, value: Optional[str]) -> str:
+    """Return a valid, configured document type key; default if invalid."""
+    return document_type_service.normalize_type(db, value)
 
 
 def _detect_document_type_from_ocr(ocr_text: Optional[str]) -> str:
@@ -60,34 +56,30 @@ def _extract_student_id_fallback(ocr_text: Optional[str]) -> Optional[str]:
 
 
 def determine_review_status(
-    *,
-    course_name: Optional[str],
-    student_name: Optional[str],
-    assignment_name: Optional[str],
-    grade: Optional[str],
-    document_date: Optional[date],
+    db: Session,
+    document_type: Optional[str],
+    field_values: dict,
     extraction_confidence: Optional[float],
 ) -> tuple[bool, Optional[str]]:
-    """Return whether the document needs review and why."""
-    reasons: List[str] = []
-    field_values = {
-        "course_name": course_name,
-        "student_name": student_name,
-        "assignment_name": assignment_name,
-        "grade": grade,
-        "document_date": document_date,
-    }
+    """
+    Return whether the document needs review and why.
 
+    Only the fields configured as *required* for this document's type are
+    checked, so e.g. a Certificate is not flagged for a missing Grade.
+    """
+    reasons: List[str] = []
+
+    required = document_type_service.required_fields(db, document_type)
     missing = [
-        label.replace("_", " ").title()
-        for label, value in field_values.items()
-        if not value
+        field["label"]
+        for field in required
+        if not field_values.get(field["key"])
     ]
     if missing:
         reasons.append(f"Missing: {', '.join(missing)}")
 
-    # Only check confidence if there are missing fields
-    # If all fields are manually filled, we trust the user's input regardless of confidence
+    # Only check confidence if there are missing fields.
+    # If all required fields are filled, we trust the user's input regardless.
     if missing and (
         extraction_confidence is not None
         and extraction_confidence < CONFIDENCE_THRESHOLD
@@ -101,18 +93,34 @@ def determine_review_status(
     return False, None
 
 
-def refresh_review_status(document: Document) -> None:
+def refresh_review_status(db: Session, document: Document) -> None:
     """Recalculate the review flags for a document."""
+    values = {
+        "course_name": document.course_name,
+        "student_name": document.student_name,
+        "assignment_name": document.assignment_name,
+        "grade": document.grade,
+        "document_date": document.document_date,
+        "student_id": document.student_id,
+    }
+    # Include custom field values so required custom fields are considered.
+    values.update(field_values.get_values(db, document.id))
+
     needs_review, reason = determine_review_status(
-        course_name=document.course_name,
-        student_name=document.student_name,
-        assignment_name=document.assignment_name,
-        grade=document.grade,
-        document_date=document.document_date,
-        extraction_confidence=document.extraction_confidence,
+        db,
+        document.document_type,
+        values,
+        document.extraction_confidence,
     )
     document.requires_review = needs_review
     document.review_reason = reason
+
+
+def build_document_response(db: Session, document: Document) -> DocumentResponse:
+    """Build a document response including its custom field values."""
+    response = DocumentResponse.model_validate(document)
+    response.custom_fields = field_values.get_values(db, document.id)
+    return response
 
 
 def find_and_delete_original_file(original_filename: str) -> bool:
@@ -237,7 +245,7 @@ async def upload_document(
         temp_file.write(contents)
         temp_file.close()
         
-        document_type_override = _normalize_document_type(document_type) if document_type else None
+        document_type_override = _normalize_document_type(db, document_type) if document_type else None
         
         document = process_document(
             temp_path,
@@ -254,15 +262,78 @@ async def upload_document(
             temp_path.unlink()
 
 
+@router.post("/bulk-upload")
+async def bulk_upload_document(file: UploadFile = File(...)):
+    """
+    Process one document with live per-stage progress, streamed as NDJSON.
+
+    Clients upload files ONE AT A TIME (keeping processing serial so the server
+    isn't overwhelmed). Each call streams stage events:
+    ``{"stage": "identify"|"ocr"|"ai"}`` and finally either
+    ``{"stage": "done", "result": "approved"|"review", "document_id": ...}`` or
+    ``{"stage": "error", "message": ...}``.
+    """
+    suffix = Path(file.filename).suffix or ".dat"
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    temp_path = Path(temp_file.name)
+    contents = await file.read()
+    temp_file.write(contents)
+    temp_file.close()
+    original_filename = file.filename
+
+    def event_stream():
+        events: queue.Queue = queue.Queue()
+        final: dict = {}
+
+        def worker():
+            db = SessionLocal()
+            try:
+                document = process_document(
+                    temp_path,
+                    db,
+                    original_filename=original_filename,
+                    progress_callback=lambda stage: events.put({"stage": stage}),
+                )
+                final["event"] = {
+                    "stage": "done",
+                    "result": "review" if document.requires_review else "approved",
+                    "document_id": str(document.id),
+                    "document_type": document.document_type,
+                    "student_name": document.student_name,
+                    "ai_used": document.ai_used,
+                    "extraction_error": document.extraction_error,
+                }
+            except Exception as exc:
+                logger.error(f"Bulk processing failed for {original_filename}: {exc}")
+                final["event"] = {"stage": "error", "message": str(exc)}
+            finally:
+                db.close()
+                if temp_path.exists():
+                    temp_path.unlink()
+                events.put(None)  # sentinel
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+        yield json.dumps(final.get("event", {"stage": "error", "message": "unknown error"})) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
 @router.get("/{document_id:uuid}", response_model=DocumentResponse)
 def get_document(document_id: UUID, db: Session = Depends(get_db)):
     """Get a specific document by ID."""
     document = db.query(Document).filter(Document.id == document_id).first()
-    
+
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    
-    return DocumentResponse.model_validate(document)
+
+    return build_document_response(db, document)
 
 
 @router.post("/{document_id:uuid}", response_model=DocumentResponse)
@@ -281,21 +352,32 @@ def update_document(
 
     # Update fields
     update_dict = update_data.model_dump(exclude_unset=True)
+    custom_input = update_dict.pop("custom_fields", None)
     for key, value in update_dict.items():
         if key == "document_type":
-            value = _normalize_document_type(value)
+            value = _normalize_document_type(db, value)
         if key == "student_id" and value == "":
             value = None
         if value is not None:
             setattr(document, key, value)
         elif key in ("student_id", "course_name", "student_name", "assignment_name", "grade", "document_date", "document_type"):
             setattr(document, key, value)
-    
+
+    # Persist custom (type-specific) field values into the values table.
+    if custom_input:
+        custom_map = document_type_service.custom_field_map(db, document.document_type)
+        for field_key, raw_value in custom_input.items():
+            field = custom_map.get(field_key)
+            if not field:
+                continue  # ignore fields that don't belong to this type
+            field_values.set_value(db, document.id, field_key, field["data_type"], raw_value)
+        db.flush()  # make new values visible to the review-status query below
+
     # Default date to today if missing after update
     if document.document_date is None:
         document.document_date = date.today()
-    
-    refresh_review_status(document)
+
+    refresh_review_status(db, document)
 
     if document.requires_review and not previous_review_state:
         document.stored_path = storage_service.move_to_review_storage(document.stored_path)
@@ -307,25 +389,28 @@ def update_document(
     document.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(document)
-    
-    return DocumentResponse.model_validate(document)
+
+    return build_document_response(db, document)
 
 
 @router.delete("/{document_id:uuid}")
 def delete_document(document_id: UUID, db: Session = Depends(get_db)):
     """Delete a document."""
     document = db.query(Document).filter(Document.id == document_id).first()
-    
+
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    
+
     # Delete the stored file
     storage_service.delete_document(document.stored_path)
-    
+
     # Also try to delete the original file from _review_queue folder (if it exists)
     # This handles cases where the document was in review queue
     find_and_delete_original_file(document.original_filename)
-    
+
+    # Remove any custom field values for this document
+    field_values.delete_values(db, document.id)
+
     # Delete from database
     db.delete(document)
     db.commit()
@@ -385,97 +470,169 @@ def get_document_preview(
     return FileResponse(path=preview_paths[page_num - 1], media_type="image/jpeg")
 
 
+CORE_FIELD_KEYS = ("course_name", "student_name", "assignment_name", "grade", "student_id")
+
+
+def _parse_document_date(value) -> date:
+    """Parse a YYYY-MM-DD (or common) date string; default to today."""
+    if value:
+        validated = ai_extractor_service.validate_date(str(value))
+        if not validated:
+            try:
+                validated = date.fromisoformat(str(value)).isoformat()
+            except ValueError:
+                validated = None
+        if validated:
+            try:
+                return date.fromisoformat(validated)
+            except ValueError:
+                pass
+    return date.today()
+
+
 def process_document(
     file_path: Path,
     db: Session,
     original_filename: Optional[str] = None,
     document_type_override: Optional[str] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Document:
     """
-    Process a document: OCR, extract fields, store, rename to descriptive name, and save to database.
+    Process a document through the extraction cascade:
+
+        OCR (first N pages) -> rules-based extraction
+          -> if any required field missing, vision AI on the first N page images
+          -> merge (validated rules win, AI fills gaps)
+          -> if still incomplete or uncertain, route to the review queue.
+
+    N is the document type's ``max_pages`` (caps both OCR and what AI sees).
     """
     logger.info(f"Processing document: {file_path}")
-    
+
+    def _notify(stage: str) -> None:
+        if progress_callback:
+            try:
+                progress_callback(stage)
+            except Exception:
+                pass
+
     # 1. Store and optimize the document
     doc_id, stored_path = storage_service.store_document(file_path)
     try:
         document_uuid = UUID(str(doc_id))
     except (ValueError, TypeError):
         document_uuid = uuid4()
-    
-    # 2. Perform OCR
-    ocr_text = ocr_service.extract_text(file_path)
-    
-    # 3. Extract fields using AI
-    extracted = ai_extractor_service.extract_fields(ocr_text or "")
-    extraction_confidence = extracted.confidence or 0.0
-    
-    # 4. Document type: override from upload or detect from OCR
-    document_type = (
-        _normalize_document_type(document_type_override)
-        if document_type_override
-        else _detect_document_type_from_ocr(ocr_text)
-    )
-    
-    # 5. Student ID: from AI or regex fallback (13-digit number)
-    extracted_student_id = extracted.student_id if extracted.student_id and extracted.student_id.strip() else None
-    if not extracted_student_id:
-        extracted_student_id = _extract_student_id_fallback(ocr_text)
-    
-    # 6. Parse date if available, default to today if missing
-    document_date = None
-    if extracted.document_date:
-        validated_date = ai_extractor_service.validate_date(extracted.document_date)
-        if validated_date:
-            document_date = date.fromisoformat(validated_date)
-    if document_date is None:
-        document_date = date.today()
 
+    # 2. Resolve document type (needed to know the page cap and field set).
+    _notify("identify")
+    if document_type_override:
+        document_type = _normalize_document_type(db, document_type_override)
+        detect_text = None
+    else:
+        # Cheap single-page OCR just to detect the type.
+        detect_text = ocr_service.extract_text(file_path, max_pages=1)
+        document_type = _normalize_document_type(db, _detect_document_type_from_ocr(detect_text))
+
+    type_config = document_type_service.get_type(db, document_type) or {}
+    max_pages = int(type_config.get("max_pages", 1) or 1)
+
+    # 3. OCR up to the type's page cap (reuse the detection pass when possible).
+    _notify("ocr")
+    if detect_text is not None and max_pages <= 1:
+        ocr_text = detect_text
+    else:
+        ocr_text = ocr_service.extract_text(file_path, max_pages=max_pages)
+
+    # 4. Tier 1 — deterministic rules extraction.
+    values = dict(rules_extractor.extract(ocr_text, type_config))
+
+    required_keys = document_type_service.required_field_keys(db, document_type)
+    missing_required = [k for k in required_keys if not values.get(k)]
+
+    # 5. Tier 2 — vision AI fallback, only if rules left required fields empty.
+    used_ai = False
+    ai_error = None
+    confidence = 0.9  # deterministic rules are treated as high-confidence
+    ai_config = settings_service.ai_config(db)
+    if missing_required and ai_config.get("enabled") and ai_config.get("api_key"):
+        _notify("ai")
+        vision = vision_extractor.extract(file_path, type_config, ai_config, max_pages)
+        used_ai = True
+        ai_error = vision.get("error")
+        confidence = float(vision.get("confidence") or 0.0)
+        for key, val in vision.get("values", {}).items():
+            values.setdefault(key, val)  # rules-validated values win; AI fills gaps
+
+    # 6. Validate the ID by checksum — never trust an unvalidated ID.
+    if values.get("student_id") and not validate_sa_id(values["student_id"]):
+        values.pop("student_id", None)
+
+    # 7. Date: parse and default to today.
+    document_date = _parse_document_date(values.get("document_date"))
+    values["document_date"] = document_date.isoformat()
+
+    # 8. Review gate: missing required fields, or AI was uncertain.
     requires_review, review_reason = determine_review_status(
-        course_name=extracted.course_name,
-        student_name=extracted.student_name,
-        assignment_name=extracted.assignment_name,
-        grade=extracted.grade,
-        document_date=document_date,
-        extraction_confidence=extraction_confidence,
+        db, document_type, values, confidence
     )
-    
-    # 7. Move to review or final storage
+    if used_ai and not requires_review and confidence < CONFIDENCE_THRESHOLD:
+        requires_review = True
+        review_reason = f"Low AI confidence ({confidence:.2f} < {CONFIDENCE_THRESHOLD:.2f})"
+    # An AI failure always needs a human look, and must be visible as such.
+    if ai_error:
+        requires_review = True
+        review_reason = f"AI extraction failed; {review_reason}" if review_reason else "AI extraction failed"
+
+    # 9. Move to review or final storage.
     if requires_review:
         stored_path = storage_service.move_to_review_storage(str(stored_path))
     else:
         stored_path = storage_service.move_to_final_storage(str(stored_path))
-    
-    # 8. Rename stored file to descriptive name (Student_Course_Type_Last4.ext)
+
+    # 10. Rename stored file to a descriptive name.
     stored_path = storage_service.rename_to_descriptive(
         str(stored_path),
-        student_name=extracted.student_name,
-        course_name=extracted.course_name,
+        student_name=values.get("student_name"),
+        course_name=values.get("course_name"),
         document_type=document_type,
-        student_id=extracted_student_id,
+        student_id=values.get("student_id"),
     )
-    
+
     document = Document(
         id=document_uuid,
-        course_name=extracted.course_name,
-        student_name=extracted.student_name,
-        assignment_name=extracted.assignment_name,
-        grade=extracted.grade,
+        course_name=values.get("course_name"),
+        student_name=values.get("student_name"),
+        assignment_name=values.get("assignment_name"),
+        grade=values.get("grade"),
         document_date=document_date,
         document_type=document_type,
-        student_id=extracted_student_id,
+        student_id=values.get("student_id"),
         original_filename=original_filename or file_path.name,
         stored_path=str(stored_path),
         ocr_text=ocr_text,
-        extraction_confidence=extraction_confidence,
+        extraction_confidence=confidence,
+        ai_used=used_ai,
+        extraction_error=ai_error,
         requires_review=requires_review,
         review_reason=review_reason,
     )
-    
     db.add(document)
+    db.flush()  # assign the row so custom field values can reference it
+
+    # 11. Persist any custom (type-specific) field values into the typed store.
+    custom_fields = {
+        f["key"]: f for f in type_config.get("fields", []) if f.get("source") == "custom"
+    }
+    for key, field in custom_fields.items():
+        if values.get(key):
+            field_values.set_value(db, document_uuid, key, field["data_type"], values[key])
+
     db.commit()
     db.refresh(document)
-    
-    logger.info(f"Document processed and saved: {document.id}")
+
+    logger.info(
+        "Document processed: %s (type=%s, ai=%s, review=%s)",
+        document.id, document_type, used_ai, requires_review,
+    )
     return document
 

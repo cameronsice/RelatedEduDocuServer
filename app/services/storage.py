@@ -16,6 +16,7 @@ from app.config import (
     STORAGE_REVIEW_PATH,
     MAX_IMAGE_DIMENSION,
     JPEG_QUALITY,
+    POPPLER_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ class StorageService:
             preview_dir = target_dir / f"{doc_id}_previews"
             preview_dir.mkdir(exist_ok=True)
             
-            pages = convert_from_path(source_path, dpi=150)  # Lower DPI for previews
+            pages = convert_from_path(source_path, dpi=150, poppler_path=POPPLER_PATH)  # Lower DPI for previews
             
             for i, page in enumerate(pages):
                 preview_path = preview_dir / f"page_{i + 1}.jpg"
@@ -212,9 +213,9 @@ class StorageService:
         if student_id and len(str(student_id).strip()) >= 4:
             last4 = str(student_id).strip()[-4:]
 
-        type_part = (document_type or "poe").strip().lower()
-        if type_part not in ("poe", "certificate"):
-            type_part = "poe"
+        # Keep the type as a safe filename segment; supports any configured
+        # type key, not just the original poe/certificate pair.
+        type_part = re.sub(r"[^a-z0-9_-]+", "", (document_type or "poe").strip().lower()) or "poe"
 
         parts = [
             self._sanitize_filename_part(student_name),
@@ -281,8 +282,30 @@ class StorageService:
         candidate = (self.review_path / path).resolve()
         return candidate
 
+    @staticmethod
+    def _is_under(path: Path, base: Path) -> bool:
+        """True if path is inside base (or equal to it)."""
+        try:
+            path.relative_to(base)
+            return True
+        except ValueError:
+            return False
+
     def _relative_to_known_base(self, path: Path) -> Path:
-        for base in (self.storage_path, self.review_path):
+        """
+        Path relative to whichever known base contains it.
+
+        The review path may be nested under the storage path (default:
+        storage/review_queue), so the more specific base is checked first.
+        Otherwise a review file would keep its "review_queue/..." prefix and
+        never actually leave the review folder when moved to final storage.
+        """
+        bases = sorted(
+            {self.storage_path.resolve(), self.review_path.resolve()},
+            key=lambda p: len(p.parts),
+            reverse=True,
+        )
+        for base in bases:
             try:
                 return path.relative_to(base)
             except ValueError:
@@ -295,6 +318,21 @@ class StorageService:
     def move_to_final_storage(self, stored_path: str) -> str:
         return str(self._move_between_bases(stored_path, self.storage_path))
 
+    def _is_already_located(self, source: Path, destination_base: Path) -> bool:
+        """
+        Whether `source` is already correctly placed for `destination_base`.
+
+        Final storage means "under the storage path but NOT under the review
+        path", because the review folder is itself nested under storage. Without
+        this distinction a review file counts as already-in-final and is never
+        moved out of the review queue (the original bug).
+        """
+        review = self.review_path.resolve()
+        storage = self.storage_path.resolve()
+        if destination_base.resolve() == review:
+            return self._is_under(source, review)
+        return self._is_under(source, storage) and not self._is_under(source, review)
+
     def _move_between_bases(self, stored_path: str, destination_base: Path) -> Path:
         source = self._ensure_absolute(stored_path).resolve()
         if not source.exists():
@@ -303,11 +341,8 @@ class StorageService:
 
         destination_base = destination_base.resolve()
 
-        try:
-            source.relative_to(destination_base)
-            return source  # already in destination tree
-        except ValueError:
-            pass
+        if self._is_already_located(source, destination_base):
+            return source  # already in the correct tree
 
         relative = self._relative_to_known_base(source)
         target_dir = destination_base / relative.parent

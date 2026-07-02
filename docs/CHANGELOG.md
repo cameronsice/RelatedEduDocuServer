@@ -1,0 +1,28 @@
+# Changelog
+
+## 2026-07-02
+
+- MCP server (`mcp_server/`): a stdio Model Context Protocol server that lets AI agents use the document server. Thin client over the REST API, target set via `RDS_BASE_URL` (default `http://192.168.88.25:8000/`). 12 tools: `search_documents`, `list_recent_documents`, `get_document`, `get_document_preview`, `upload_document`, `bulk_upload_documents`, `list_review_queue`, `update_document`, `list_document_types`, `get_ai_status`, `test_ai_connection`, `server_health`. Read + add + edit only (no delete); AI config is read-only + test; uploads take local file paths. See [../mcp_server/README.md](../mcp_server/README.md).
+- Bulk upload: select multiple (mixed-type) files; each is processed one at a time (serial, so the server isn't overwhelmed) with a live per-file queue showing the current stage — Uploading → Identify → OCR Reading → AI Reading → Approved/Needs Review. Type is auto-identified. Backend streams NDJSON stage events (`POST /api/documents/bulk-upload`); `process_document` gained an optional progress callback.
+- AI Settings: "Test Connection" button (round-trips the model, returns its reply + latency, or the error). Model calls now adapt `max_tokens`/`max_completion_tokens` + temperature per model, so GPT-5-era models work.
+- AI failure visibility: AI errors are captured (not swallowed) and surfaced — review queue "AI" column with a "⚠ AI error" badge (full error on hover), review reason prefixed "AI extraction failed", and a red alert on the document view. Documents also record whether the AI tier ran ("Rules only" vs "Rules + AI"). New additive columns `ai_used`, `extraction_error`.
+- Extraction cascade: OCR (first N pages) → deterministic rules extractor → if required fields missing, vision-AI fallback on the first N page images → merge (validated rules win) → review queue if still incomplete/uncertain. Per-type `max_pages` caps OCR and AI (Certificate 1, POE 5).
+- Rules-based extraction: SA-ID regex + Luhn checksum validation, label-preferred date parsing, label-anchored named fields.
+- AI extraction is now runtime-configurable on the Settings page (provider, model, API key, base URL) instead of only `.env`; supports OpenAI-compatible and local/self-hosted endpoints. Vision (multimodal) extraction added for handwriting-heavy documents.
+- Rebrand to "Related Document Server" with Related logo mark (navbar, favicon, titles, footer).
+- Dynamic, configurable document types: types and their fields are now data (new `document_types` table), managed on a new `/settings` page (create/edit/delete types, add core or custom fields, set required/visible, hard-delete with usage warning).
+- Per-field data types (text / number / date / id) with a typed custom-field value store (new `document_field_values` table); `documents` table unchanged.
+- Type-aware review: only a type's required fields are checked. POE Grade is now optional; Student ID is required for POE and Certificate; Certificate hides Assignment/Grade.
+- Review form (document view) is now type-driven: type selector on top, fields render below per type; custom fields included; values persist to the typed store.
+- Search: general query now also matches custom field values.
+- Fixed review→final file move when the review folder is nested under the storage folder (files no longer stay stuck in `review_queue` after approval).
+- Dev tooling: SQLite dev mode via `DATABASE_URL`; `.env` / `.env.example`; updated Starlette `TemplateResponse` calls to the current signature.
+
+## 2025-02-06
+
+- Added document type: POE (Grade Books) and Certificate; dropdown on upload, OCR auto-detect from "Certificate issued".
+- Added Student ID field (13-digit); AI extraction + regex fallback; searchable (filter + general query).
+- Stored files renamed to descriptive names: `StudentName_CourseName_Type_Last4.ext`; collision suffix _1, _2.
+- DB: `document_type`, `student_id` columns; index on `student_id`. `init_db()` migrations for both.
+- API: POST upload optional `document_type`; DocumentUpdate/Response include `document_type`, `student_id`; GET /api/search `student_id` param and in full-text.
+- UI: Upload type dropdown; document view type + Student ID; search Student ID filter; dashboard and review Type column.

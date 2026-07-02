@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
 from app.database import get_db
-from app.models import Document
+from app.models import Document, DocumentFieldValue
 from app.schemas import DocumentResponse, DocumentListResponse, SearchQuery
 
 logger = logging.getLogger(__name__)
@@ -39,16 +39,22 @@ def search_documents(
     base_query = db.query(Document)
     filters = []
     
-    # General search query - searches across multiple fields
+    # General search query - searches across multiple fields, including any
+    # custom (type-specific) field values stored in document_field_values.
     if query:
         search_pattern = f"%{query}%"
+        custom_match = (
+            db.query(DocumentFieldValue.document_id)
+            .filter(DocumentFieldValue.value_text.ilike(search_pattern))
+        )
         filters.append(
             or_(
                 Document.student_name.ilike(search_pattern),
                 Document.course_name.ilike(search_pattern),
                 Document.assignment_name.ilike(search_pattern),
                 Document.student_id.ilike(search_pattern),
-                Document.ocr_text.ilike(search_pattern)
+                Document.ocr_text.ilike(search_pattern),
+                Document.id.in_(custom_match),
             )
         )
     

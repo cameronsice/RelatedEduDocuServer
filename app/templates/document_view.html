@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ document.student_name or 'Document' }} - Education Document Server{% endblock %}
+{% block title %}{{ document.student_name or 'Document' }} - Related Document Server{% endblock %}
 
 {% block content %}
 <div class="document-page">
@@ -43,46 +43,22 @@
                 <strong>Approved:</strong> All required fields are present.
                 {% endif %}
             </div>
+            {% if document.extraction_error %}
+            <div class="alert alert-danger">
+                <strong>AI extraction error:</strong> {{ document.extraction_error }}
+            </div>
+            {% endif %}
             <form id="edit-form" class="details-form">
                 <div class="form-group">
-                    <label for="student_name">Student Name</label>
-                    <input type="text" id="student_name" name="student_name" value="{{ document.student_name or '' }}">
+                    <label for="document_type">Document type</label>
+                    <select id="document_type" name="document_type">
+                        <!-- Options populated from /api/document-types -->
+                    </select>
+                    <p class="field-hint">Fields below adjust to the selected type.</p>
                 </div>
 
-                <div class="form-group">
-                    <label for="course_name">Course Name</label>
-                    <input type="text" id="course_name" name="course_name" value="{{ document.course_name or '' }}">
-                </div>
-
-                <div class="form-group">
-                    <label for="assignment_name">Assignment Name</label>
-                    <input type="text" id="assignment_name" name="assignment_name" value="{{ document.assignment_name or '' }}">
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="document_type">Document type</label>
-                        <select id="document_type" name="document_type">
-                            <option value="poe" {% if document.document_type == 'poe' or not document.document_type %}selected{% endif %}>POE (Grade Books)</option>
-                            <option value="certificate" {% if document.document_type == 'certificate' %}selected{% endif %}>Certificate</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="student_id">Student ID</label>
-                        <input type="text" id="student_id" name="student_id" value="{{ document.student_id or '' }}" placeholder="13-digit ID" maxlength="20">
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="grade">Grade</label>
-                        <input type="text" id="grade" name="grade" value="{{ document.grade or '' }}">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="document_date">Date</label>
-                        <input type="date" id="document_date" name="document_date" value="{{ document.document_date.strftime('%Y-%m-%d') if document.document_date else '' }}">
-                    </div>
+                <div id="dynamic-fields">
+                    <!-- Type-specific fields are rendered here by JS -->
                 </div>
 
                 <div class="form-actions">
@@ -105,6 +81,8 @@
                     <dd>{{ document.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
                     <dt>Last Modified</dt>
                     <dd>{{ document.updated_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                    <dt>Extraction</dt>
+                    <dd>{{ 'Rules + AI' if document.ai_used else 'Rules only' }}</dd>
                 </dl>
             </div>
         </div>
@@ -150,15 +128,102 @@ document.addEventListener('DOMContentLoaded', function() {
         if (nextPreview) nextPreview.disabled = currentPreviewPage >= numPages;
     }
 
+    // --- Type-aware fields ---------------------------------------------
+    // Current stored values, used to prefill fields and preserve edits when
+    // switching type.
+    const docValues = {
+        student_name: {{ (document.student_name or '')|tojson }},
+        course_name: {{ (document.course_name or '')|tojson }},
+        assignment_name: {{ (document.assignment_name or '')|tojson }},
+        grade: {{ (document.grade or '')|tojson }},
+        document_date: {{ (document.document_date.strftime('%Y-%m-%d') if document.document_date else '')|tojson }},
+        student_id: {{ (document.student_id or '')|tojson }},
+    };
+    // Merge in custom (type-specific) field values.
+    Object.assign(docValues, {{ custom_values|tojson }});
+    const currentType = {{ (document.document_type or 'poe')|tojson }};
+
+    const typeSelect = document.getElementById('document_type');
+    const dynamicFields = document.getElementById('dynamic-fields');
+    let typesConfig = [];
+
+    function captureCurrentInputs() {
+        dynamicFields.querySelectorAll('input').forEach((inp) => {
+            docValues[inp.name] = inp.value;
+        });
+    }
+
+    function renderFields(typeKey) {
+        const type = typesConfig.find((t) => t.key === typeKey);
+        dynamicFields.innerHTML = '';
+        if (!type) return;
+        type.fields.filter((f) => f.visible).forEach((f) => {
+            const group = document.createElement('div');
+            group.className = 'form-group';
+
+            const label = document.createElement('label');
+            label.setAttribute('for', f.key);
+            label.textContent = f.label + (f.required ? ' *' : '');
+
+            const input = document.createElement('input');
+            input.type = f.input_type === 'date' ? 'date' : 'text';
+            input.id = f.key;
+            input.name = f.key;
+            input.value = docValues[f.key] || '';
+            if (f.key === 'student_id') {
+                input.placeholder = '13-digit ID';
+                input.maxLength = 20;
+            }
+
+            group.appendChild(label);
+            group.appendChild(input);
+            dynamicFields.appendChild(group);
+        });
+    }
+
+    async function loadTypes() {
+        try {
+            const res = await fetch('/api/document-types');
+            const data = await res.json();
+            typesConfig = data.document_types || [];
+        } catch (err) {
+            typesConfig = [];
+        }
+        typeSelect.innerHTML = '';
+        typesConfig.forEach((t) => {
+            const opt = document.createElement('option');
+            opt.value = t.key;
+            opt.textContent = t.label;
+            if (t.key === currentType) opt.selected = true;
+            typeSelect.appendChild(opt);
+        });
+        renderFields(typeSelect.value || currentType);
+    }
+
+    typeSelect.addEventListener('change', () => {
+        captureCurrentInputs();
+        renderFields(typeSelect.value);
+    });
+
+    loadTypes();
+
     // Edit form
     const editForm = document.getElementById('edit-form');
     editForm.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const formData = new FormData(editForm);
-        const data = {};
-        formData.forEach((value, key) => {
-            data[key] = value || null;
+        // Split values by field source: core fields go top-level, custom
+        // fields go under custom_fields (matching the API contract).
+        const type = typesConfig.find((t) => t.key === typeSelect.value);
+        const data = { document_type: typeSelect.value, custom_fields: {} };
+        (type ? type.fields : []).forEach((f) => {
+            const el = document.getElementById(f.key);
+            const val = el ? (el.value || null) : null;
+            if (f.source === 'custom') {
+                data.custom_fields[f.key] = val;
+            } else {
+                data[f.key] = val;
+            }
         });
 
         try {

@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Related Document Server{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+    <header class="page-header">
+        <h1>Settings</h1>
+        <p class="subtitle">Manage document types and the fields each one captures</p>
+    </header>
+
+    <section class="settings-section">
+        <div class="section-header">
+            <h2>Document Types</h2>
+            <button id="add-type-btn" class="btn btn-primary btn-small">+ Add Type</button>
+        </div>
+        <div id="type-list" class="type-list"><p>Loading…</p></div>
+    </section>
+
+    <div id="editor" class="settings-editor hidden">
+        <div class="section-header">
+            <h2 id="editor-title">Edit Type</h2>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="type-label">Type name</label>
+                <input type="text" id="type-label" placeholder="e.g. Report Card">
+            </div>
+            <div class="form-group">
+                <label for="type-key">Key</label>
+                <input type="text" id="type-key" placeholder="auto from name">
+                <p class="field-hint">Lowercase id; cannot change after creation.</p>
+            </div>
+            <div class="form-group">
+                <label for="type-max-pages">Max pages</label>
+                <input type="number" id="type-max-pages" min="1" value="1">
+                <p class="field-hint">Pages to OCR / send to AI.</p>
+            </div>
+            <div class="form-group form-group-check">
+                <label><input type="checkbox" id="type-active" checked> Active</label>
+            </div>
+        </div>
+
+        <h3>Fields</h3>
+        <div class="fields-editor" id="fields-editor"></div>
+
+        <div class="add-field-controls">
+            <div class="form-group">
+                <label for="core-field-select">Add existing field</label>
+                <div class="inline-controls">
+                    <select id="core-field-select"></select>
+                    <button type="button" id="add-core-btn" class="btn btn-secondary btn-small">Add</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="custom-field-label">Add custom field</label>
+                <div class="inline-controls">
+                    <input type="text" id="custom-field-label" placeholder="Field name">
+                    <select id="custom-field-type"></select>
+                    <button type="button" id="add-custom-btn" class="btn btn-secondary btn-small">Add</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="button" id="save-type-btn" class="btn btn-primary">Save</button>
+            <button type="button" id="cancel-edit-btn" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+
+    <section class="settings-section">
+        <div class="section-header">
+            <h2>AI Extraction</h2>
+        </div>
+        <div class="settings-editor">
+            <p class="field-hint" style="margin-bottom: 1rem;">
+                Used as the fallback when rules-based extraction can't fill every field.
+                Point Base URL at a self-hosted / OpenAI-compatible endpoint to keep data on-premises.
+            </p>
+            <div class="form-group form-group-check">
+                <label><input type="checkbox" id="ai-enabled"> Enable AI extraction</label>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="ai-provider">Provider</label>
+                    <select id="ai-provider">
+                        <option value="openai">OpenAI</option>
+                        <option value="azure-openai">Azure OpenAI</option>
+                        <option value="local">Local / self-hosted</option>
+                        <option value="custom">Custom (OpenAI-compatible)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="ai-model">Model</label>
+                    <input type="text" id="ai-model" placeholder="e.g. gpt-4o-mini">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="ai-base-url">Base URL <span class="field-hint">(optional)</span></label>
+                    <input type="text" id="ai-base-url" placeholder="https://api.openai.com/v1 or http://localhost:11434/v1">
+                </div>
+                <div class="form-group">
+                    <label for="ai-api-key">API Key</label>
+                    <input type="password" id="ai-api-key" placeholder="leave blank to keep current">
+                    <p class="field-hint" id="ai-key-status"></p>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" id="save-ai-btn" class="btn btn-primary">Save AI Settings</button>
+                <button type="button" id="test-ai-btn" class="btn btn-secondary">Test Connection</button>
+            </div>
+            <p id="ai-test-result" class="ai-test-result"></p>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const API = '/api/document-types';
+    let coreFields = [];
+    let dataTypes = [];
+    let editingKey = null;
+    let editFields = [];
+
+    const typeList = document.getElementById('type-list');
+    const editor = document.getElementById('editor');
+    const editorTitle = document.getElementById('editor-title');
+    const labelInput = document.getElementById('type-label');
+    const keyInput = document.getElementById('type-key');
+    const activeInput = document.getElementById('type-active');
+    const fieldsEditor = document.getElementById('fields-editor');
+    const coreSelect = document.getElementById('core-field-select');
+    const customType = document.getElementById('custom-field-type');
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+    }
+
+    async function loadLibrary() {
+        const res = await fetch(API + '/field-library');
+        const data = await res.json();
+        coreFields = data.core_fields || [];
+        dataTypes = data.data_types || ['text'];
+        customType.innerHTML = dataTypes.map((t) => `<option value="${t}">${t}</option>`).join('');
+    }
+
+    async function loadTypes() {
+        typeList.innerHTML = '<p>Loading…</p>';
+        const res = await fetch(API + '/manage');
+        const data = await res.json();
+        const types = data.document_types || [];
+        typeList.innerHTML = '';
+        if (!types.length) { typeList.innerHTML = '<p class="field-hint">No document types yet.</p>'; return; }
+        types.forEach((t) => typeList.appendChild(renderCard(t)));
+    }
+
+    function renderCard(t) {
+        const card = document.createElement('div');
+        card.className = 'type-card';
+        const fieldsHtml = t.fields.map((f) => `
+            <li>
+                <span class="field-name">${esc(f.label)}</span>
+                <span class="field-meta">${esc(f.data_type)}${f.source === 'custom' ? ' · custom' : ''}${f.required ? ' · required' : ''}${!f.visible ? ' · hidden' : ''}</span>
+            </li>`).join('');
+        card.innerHTML = `
+            <div class="type-card-head">
+                <div class="type-card-titles">
+                    <span class="type-card-title">${esc(t.label)}</span>
+                    <span class="type-card-key">${esc(t.key)} · ${t.max_pages} pg</span>
+                    ${t.is_active ? '' : '<span class="badge-inactive">inactive</span>'}
+                </div>
+                <div class="type-card-actions">
+                    <button class="btn btn-small edit-btn">Edit</button>
+                    <button class="btn btn-small btn-danger del-btn">Delete</button>
+                </div>
+            </div>
+            <ul class="type-card-fields">${fieldsHtml}</ul>`;
+        card.querySelector('.edit-btn').addEventListener('click', () => openEditor(t));
+        card.querySelector('.del-btn').addEventListener('click', () => deleteType(t.key, t.label));
+        return card;
+    }
+
+    function openEditor(t) {
+        editingKey = t ? t.key : null;
+        editorTitle.textContent = t ? `Edit: ${t.label}` : 'Add Document Type';
+        labelInput.value = t ? t.label : '';
+        keyInput.value = t ? t.key : '';
+        keyInput.disabled = !!t;
+        document.getElementById('type-max-pages').value = t ? (t.max_pages || 1) : 1;
+        activeInput.checked = t ? t.is_active : true;
+        editFields = t ? t.fields.map((f) => Object.assign({}, f)) : [];
+        renderFieldsEditor();
+        refreshCoreSelect();
+        editor.classList.remove('hidden');
+        editor.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function closeEditor() { editor.classList.add('hidden'); }
+
+    function renderFieldsEditor() {
+        fieldsEditor.innerHTML = '';
+        if (!editFields.length) {
+            fieldsEditor.innerHTML = '<p class="field-hint">No fields yet — add existing or custom fields below.</p>';
+            return;
+        }
+        editFields.forEach((f, i) => {
+            const row = document.createElement('div');
+            row.className = 'field-row';
+            row.innerHTML = `
+                <span class="fr-label">${esc(f.label)}</span>
+                <span class="fr-type">${esc(f.data_type)}${f.source === 'custom' ? ' (custom)' : ''}</span>
+                <label class="fr-check"><input type="checkbox" data-i="${i}" data-k="required" ${f.required ? 'checked' : ''}> required</label>
+                <label class="fr-check"><input type="checkbox" data-i="${i}" data-k="visible" ${f.visible ? 'checked' : ''}> visible</label>
+                <button type="button" class="btn btn-small btn-danger fr-remove" data-i="${i}">✕</button>`;
+            fieldsEditor.appendChild(row);
+        });
+        fieldsEditor.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+            cb.addEventListener('change', () => { editFields[+cb.dataset.i][cb.dataset.k] = cb.checked; });
+        });
+        fieldsEditor.querySelectorAll('.fr-remove').forEach((btn) => {
+            btn.addEventListener('click', () => { editFields.splice(+btn.dataset.i, 1); renderFieldsEditor(); refreshCoreSelect(); });
+        });
+    }
+
+    function refreshCoreSelect() {
+        const used = new Set(editFields.map((f) => f.key));
+        const avail = coreFields.filter((cf) => !used.has(cf.key));
+        coreSelect.innerHTML = avail.length
+            ? avail.map((cf) => `<option value="${cf.key}">${esc(cf.label)}</option>`).join('')
+            : '<option value="">(all added)</option>';
+    }
+
+    document.getElementById('add-core-btn').addEventListener('click', () => {
+        const key = coreSelect.value;
+        if (!key) return;
+        const cf = coreFields.find((c) => c.key === key);
+        editFields.push({ key: cf.key, label: cf.label, data_type: cf.data_type, source: 'core', required: false, visible: true });
+        renderFieldsEditor(); refreshCoreSelect();
+    });
+
+    document.getElementById('add-custom-btn').addEventListener('click', () => {
+        const labelEl = document.getElementById('custom-field-label');
+        const label = labelEl.value.trim();
+        if (!label) return;
+        editFields.push({ key: label, label: label, data_type: customType.value || 'text', source: 'custom', required: false, visible: true });
+        labelEl.value = '';
+        renderFieldsEditor(); refreshCoreSelect();
+    });
+
+    document.getElementById('add-type-btn').addEventListener('click', () => openEditor(null));
+    document.getElementById('cancel-edit-btn').addEventListener('click', closeEditor);
+
+    document.getElementById('save-type-btn').addEventListener('click', async () => {
+        const label = labelInput.value.trim();
+        if (!label) { alert('Type name is required'); return; }
+        const payload = {
+            label: label,
+            is_active: activeInput.checked,
+            max_pages: parseInt(document.getElementById('type-max-pages').value, 10) || 1,
+            fields: editFields.map((f) => ({ key: f.key, label: f.label, data_type: f.data_type, required: f.required, visible: f.visible })),
+        };
+        let url = API, method = 'POST';
+        if (editingKey) { url = `${API}/${editingKey}`; method = 'PUT'; }
+        else { payload.key = keyInput.value.trim() || label; }
+        const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (res.ok) { closeEditor(); loadTypes(); }
+        else { const e = await res.json().catch(() => ({})); alert('Save failed: ' + (e.detail || res.status)); }
+    });
+
+    async function deleteType(key, label) {
+        let count = 0;
+        try { const r = await fetch(`${API}/${key}/usage`); count = (await r.json()).count; } catch (e) { /* ignore */ }
+        const msg = count > 0
+            ? `Warning: ${count} document(s) currently use "${label}". Deleting it will leave those documents referencing a type that no longer exists.\n\nDelete anyway?`
+            : `Delete document type "${label}"?`;
+        if (!confirm(msg)) return;
+        const res = await fetch(`${API}/${key}`, { method: 'DELETE' });
+        if (res.ok) loadTypes(); else alert('Delete failed');
+    }
+
+    // --- AI extraction settings ---
+    async function loadAiSettings() {
+        try {
+            const res = await fetch('/api/settings/ai');
+            const cfg = await res.json();
+            document.getElementById('ai-enabled').checked = !!cfg.enabled;
+            document.getElementById('ai-provider').value = cfg.provider || 'openai';
+            document.getElementById('ai-model').value = cfg.model || '';
+            document.getElementById('ai-base-url').value = cfg.base_url || '';
+            document.getElementById('ai-key-status').textContent = cfg.api_key_set
+                ? 'A key is currently set. Leave blank to keep it.'
+                : 'No key set.';
+        } catch (e) { /* ignore */ }
+    }
+
+    document.getElementById('save-ai-btn').addEventListener('click', async () => {
+        const payload = {
+            enabled: document.getElementById('ai-enabled').checked,
+            provider: document.getElementById('ai-provider').value,
+            model: document.getElementById('ai-model').value.trim(),
+            base_url: document.getElementById('ai-base-url').value.trim(),
+        };
+        const key = document.getElementById('ai-api-key').value.trim();
+        if (key) payload.api_key = key;
+        const res = await fetch('/api/settings/ai', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+            document.getElementById('ai-api-key').value = '';
+            await loadAiSettings();
+            alert('AI settings saved.');
+        } else {
+            alert('Failed to save AI settings.');
+        }
+    });
+
+    document.getElementById('test-ai-btn').addEventListener('click', async () => {
+        const payload = {
+            provider: document.getElementById('ai-provider').value,
+            model: document.getElementById('ai-model').value.trim(),
+            base_url: document.getElementById('ai-base-url').value.trim(),
+        };
+        const key = document.getElementById('ai-api-key').value.trim();
+        if (key) payload.api_key = key;
+
+        const out = document.getElementById('ai-test-result');
+        const btn = document.getElementById('test-ai-btn');
+        out.textContent = 'Testing…';
+        out.className = 'ai-test-result';
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/settings/ai/test', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+            });
+            const r = await res.json();
+            if (r.ok) {
+                out.textContent = `✓ Connected to ${r.model} in ${r.latency_ms} ms — reply: "${r.response}"`;
+                out.className = 'ai-test-result ok';
+            } else {
+                out.textContent = `✗ ${r.message}`;
+                out.className = 'ai-test-result err';
+            }
+        } catch (e) {
+            out.textContent = '✗ ' + e.message;
+            out.className = 'ai-test-result err';
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    (async function init() { await loadLibrary(); await loadTypes(); await loadAiSettings(); })();
+});
+</script>
+{% endblock %}
