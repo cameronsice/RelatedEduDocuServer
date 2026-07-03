@@ -93,6 +93,25 @@ def main() -> int:
         shot_element("/", ".upload-section", 0, "upload-single.png")
         shot_element("/", ".upload-section", 1, "upload-bulk.png")
 
+        # Settings: the "create a document type" editor, populated for illustration.
+        goto("/settings")
+        page.click("#add-type-btn")
+        page.wait_for_timeout(300)
+        page.fill("#type-label", "Report Card")
+        page.fill("#type-max-pages", "2")
+        try:
+            page.click("#add-core-btn")  # add the first available core field
+        except Exception:
+            pass
+        page.fill("#custom-field-label", "Term")
+        page.click("#add-custom-btn")
+        page.wait_for_timeout(300)
+        editor = page.locator("#editor")
+        editor.scroll_into_view_if_needed()
+        page.wait_for_timeout(200)
+        editor.screenshot(path=str(OUT_DIR / "type-editor.png"))
+        print("  wrote type-editor.png")
+
         browser.close()
 
     print(f"Done. Images in {OUT_DIR}")

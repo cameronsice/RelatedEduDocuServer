@@ -12,12 +12,19 @@
     <div class="guide-intro">
         <h2>What is this system?</h2>
         <p>
-            The Related Document Server keeps all your scanned student documents —
-            <strong>Certificates</strong> and <strong>POEs (Grade Books)</strong> — in one place.
-            When you add a document, the system reads it automatically and pulls out the
-            important details (student name, course, ID number, date). You can then
-            <strong>search</strong> for any document in seconds, and quickly
-            <strong>check</strong> anything the system wasn't sure about.
+            The Related Document Server keeps all your scanned student documents in one
+            place. When you add a document, the system reads it automatically and pulls
+            out the details that matter for that kind of document (things like student
+            name, course, ID number and date). You can then <strong>search</strong> for
+            any document in seconds, and quickly <strong>check</strong> anything the
+            system wasn't sure about.
+        </p>
+        <p>
+            The kinds of document it handles are <strong>fully configurable</strong>.
+            Right now it's set up for <strong>Certificates</strong> and
+            <strong>POEs (Grade Books)</strong> — but an administrator can add a brand-new
+            document type at any time, with its own fields. See
+            <a href="#types">Add your own document types</a>.
         </p>
         <p style="margin-bottom:0;">
             You don't need any technical knowledge. This guide walks you through each task
@@ -33,7 +40,8 @@
         <a href="#review"><span class="toc-icon">📝</span> Check &amp; fix documents</a>
         <a href="#search"><span class="toc-icon">🔍</span> Find a document</a>
         <a href="#labels"><span class="toc-icon">🏷️</span> What the labels mean</a>
-        <a href="#settings"><span class="toc-icon">⚙️</span> Settings (for admins)</a>
+        <a href="#types"><span class="toc-icon">🧩</span> Add your own document types</a>
+        <a href="#ai-reader"><span class="toc-icon">⚙️</span> The automatic reader</a>
         <a href="#help"><span class="toc-icon">💬</span> Need help?</a>
     </nav>
 
@@ -47,7 +55,7 @@
             <li><strong>Dashboard</strong><p>The home page. See recent documents, how many need review, and add new documents.</p></li>
             <li><strong>Search</strong><p>Find any document by student, course, ID number, or date.</p></li>
             <li><strong>Review Queue</strong><p>The list of documents the system wasn't fully sure about, waiting for you to check.</p></li>
-            <li><strong>Settings</strong><p>For administrators — set up document types and the reader. You can usually ignore this.</p></li>
+            <li><strong>Settings</strong><p>For administrators — create and manage document types and set up the automatic reader. See <a href="#types">Add your own document types</a>.</p></li>
         </ul>
         <figure class="guide-figure">
             <img src="/static/images/guide/dashboard.png" alt="The Dashboard page showing statistics, recent documents, and upload areas">
@@ -59,11 +67,11 @@
     <!-- Upload one -->
     <section class="guide-section" id="upload-one">
         <h2>📤 Upload one document</h2>
-        <p>The quickest way to add a single Certificate or POE:</p>
+        <p>The quickest way to add a single document:</p>
         <ol class="guide-steps">
             <li><strong>Go to the Dashboard</strong><p>Click <em>Dashboard</em> in the top menu.</p></li>
             <li><strong>Scroll down to “Upload Document”</strong></li>
-            <li><strong>Choose the document type</strong><p>Pick <em>POE (Grade Books)</em> or <em>Certificates</em> from the drop-down.</p></li>
+            <li><strong>Choose the document type</strong><p>Pick the type from the drop-down. It lists whatever types your organisation has set up (right now, Certificates and POEs — but there may be more).</p></li>
             <li><strong>Add your file</strong><p>Drag the file onto the box, or click the box to browse your computer. PDF, PNG, JPG and TIFF files all work.</p></li>
             <li><strong>Wait a moment</strong><p>The system reads the document and opens its details automatically. That's it — it's saved.</p></li>
         </ol>
@@ -84,7 +92,7 @@
         <p>Have a whole stack to add? Bulk Upload handles them all — one at a time so nothing gets missed.</p>
         <ol class="guide-steps">
             <li><strong>Go to the Dashboard</strong><p>Scroll down to the <em>Bulk Upload</em> section (below the single upload).</p></li>
-            <li><strong>Select all your files</strong><p>Drag several files onto the box, or click it and hold <em>Ctrl</em> (or <em>Shift</em>) to pick many. Certificates and POEs can be mixed together — the system works out the type for you.</p></li>
+            <li><strong>Select all your files</strong><p>Drag several files onto the box, or click it and hold <em>Ctrl</em> (or <em>Shift</em>) to pick many. Different document types can be mixed together — the system works out the type of each one for you.</p></li>
             <li><strong>Watch the progress</strong><p>Each file moves through the steps: <em>Uploading → Identify → OCR Reading → AI Reading → Done</em>. They process one after another.</p></li>
             <li><strong>Check the results</strong><p>Each file ends with a green <strong>Approved</strong> or an orange <strong>Needs Review</strong> label. Click a label to open that document.</p></li>
         </ol>
@@ -170,23 +178,71 @@
         <a class="guide-back-top" href="#top">↑ Back to top</a>
     </section>
 
-    <!-- Settings -->
-    <section class="guide-section" id="settings">
-        <h2>⚙️ Settings (for administrators)</h2>
+    <!-- Document types (administrators) -->
+    <section class="guide-section" id="types">
+        <h2>🧩 Add your own document types</h2>
         <p>
-            Most people never need this page. Administrators use <strong>Settings</strong> to:
+            The system is <strong>not limited to Certificates and POEs</strong> — those are
+            just the two types set up today. Whenever you start handling a new kind of
+            paperwork (a report card, an ID copy, an attendance register — anything), an
+            administrator can create a new <strong>document type</strong> for it, with its
+            own set of fields. This is done on the <strong>Settings</strong> page.
         </p>
-        <ul class="guide-steps">
-            <li><strong>Manage document types</strong><p>Add or change the types (like POE and Certificate) and the fields each one collects.</p></li>
-            <li><strong>Set up the automatic reader (AI)</strong><p>Enter the reader's connection details and press <em>Test Connection</em> to confirm it's working.</p></li>
-        </ul>
+        <p>
+            On Settings, every existing type is shown as a card listing its fields, with
+            <em>Edit</em> and <em>Delete</em> buttons and an <strong>+ Add Type</strong>
+            button at the top.
+        </p>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">Create a new type — step by step</h3>
+        <ol class="guide-steps">
+            <li><strong>Open Settings and click “+ Add Type”</strong><p>Under <em>Document Types</em>, click the <strong>+ Add Type</strong> button. An editor opens.</p></li>
+            <li><strong>Give the type a name</strong><p>Type a <em>Type name</em>, e.g. “Report Card”. The <em>Key</em> next to it fills in on its own — it's a short internal id you don't need to worry about (it can't be changed later).</p></li>
+            <li><strong>Set how many pages to read</strong><p><em>Max pages</em> is how many pages the system reads from each document. Use <strong>1</strong> for a single-page document like a certificate, or a few more for a booklet. Keeping it small keeps things fast.</p></li>
+            <li><strong>Add the fields it should capture</strong>
+                <p><strong>Add existing field</strong> — pick a standard field (Student Name, Course, Student ID, Date…) from the drop-down and click <em>Add</em>.</p>
+                <p><strong>Add custom field</strong> — for something new, type a field name (e.g. “Term”), choose what kind of value it holds (<em>text</em>, <em>number</em>, <em>date</em>, or <em>ID</em>), and click <em>Add</em>.</p>
+            </li>
+            <li><strong>Mark each field required or optional</strong><p>For every field, tick <strong>required</strong> if a document can't be filed without it, and <strong>visible</strong> to show it on the form. (Required fields are what decides whether a document needs review.)</p></li>
+            <li><strong>Save</strong><p>Click <strong>Save</strong>. The new type is ready straight away — it appears in the upload drop-down, and its fields show on the review form.</p></li>
+        </ol>
         <figure class="guide-figure">
-            <img src="/static/images/guide/settings.png" alt="The Settings page for managing document types and the AI reader">
-            <figcaption>Settings — for setting up document types and the automatic reader.</figcaption>
+            <img src="/static/images/guide/type-editor.png" alt="The document type editor: type name, key, max pages, a list of fields with required/visible toggles, and controls to add fields">
+            <figcaption>Creating a “Report Card” type — name it, set the pages, then add its fields.</figcaption>
         </figure>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/settings.png" alt="The Settings page showing a card for each document type and the AI Extraction settings">
+            <figcaption>The Settings page — a card for each type, plus <strong>+ Add Type</strong> at the top.</figcaption>
+        </figure>
+        <div class="guide-callout">
+            <span class="callout-icon">💡</span>
+            <p>You can <strong>Edit</strong> a type later to add or remove fields, or <strong>Delete</strong> a type you no longer use. If any documents still use a type, the system warns you before deleting it.</p>
+        </div>
         <div class="guide-callout callout-warning">
             <span class="callout-icon">⚠️</span>
-            <p>Changing settings affects everyone. If you're not sure, leave this page alone and ask your administrator.</p>
+            <p>Document types are shared by everyone. If you're not sure whether to change one, ask your administrator first.</p>
+        </div>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- AI reader (administrators) -->
+    <section class="guide-section" id="ai-reader">
+        <h2>⚙️ The automatic reader (for administrators)</h2>
+        <p>
+            The system reads most documents on its own. For harder ones — like handwriting
+            — it can call on a smarter <strong>AI reader</strong>. This is optional and is
+            set up once by an administrator, in the <em>AI Extraction</em> section of the
+            <strong>Settings</strong> page (shown above).
+        </p>
+        <ol class="guide-steps">
+            <li><strong>Turn it on</strong><p>Tick <em>Enable AI extraction</em>.</p></li>
+            <li><strong>Enter the connection details</strong><p>Choose the <em>Provider</em>, enter the <em>Model</em> name and the <em>API Key</em> (and a <em>Base URL</em> if you're using an in-house reader).</p></li>
+            <li><strong>Test it</strong><p>Click <strong>Test Connection</strong>. A green message confirms it's working; a red one explains what's wrong.</p></li>
+            <li><strong>Save</strong><p>Click <strong>Save AI Settings</strong>.</p></li>
+        </ol>
+        <div class="guide-callout callout-warning">
+            <span class="callout-icon">⚠️</span>
+            <p>These settings affect everyone. If the AI reader isn't set up, documents that need it simply go to the Review Queue to be filled in by hand — nothing is lost.</p>
         </div>
         <a class="guide-back-top" href="#top">↑ Back to top</a>
     </section>

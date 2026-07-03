@@ -1323,3 +1323,58 @@ a:hover {
 }
 .guide-back-top:hover { text-decoration: underline; }
 
+/* ------------------------------------------------------------
+   Print / PDF export of the User Guide
+   The stylesheet is fully tokenized, so redefining the colour
+   tokens here flips the whole guide to a light, paper-friendly
+   theme when printing or exporting to PDF (scripts/build_guide_pdf.py).
+   ------------------------------------------------------------ */
+@media print {
+    :root {
+        --color-bg-primary: #ffffff;
+        --color-bg-secondary: #f5f8fb;
+        --color-bg-tertiary: #eef3f7;
+        --color-bg-card: #f7fafc;
+        --color-bg-hover: #eef3f7;
+        --color-accent: #0c8f76;
+        --color-accent-hover: #0c8f76;
+        --color-accent-muted: rgba(12, 143, 118, 0.10);
+        --color-text-primary: #101a22;
+        --color-text-secondary: #33434f;
+        --color-text-muted: #66757f;
+        --color-border: #d6dfe8;
+        --color-border-light: #c4d1dc;
+        --shadow-sm: none;
+        --shadow-md: none;
+        --shadow-lg: none;
+    }
+
+    html, body { background: #ffffff !important; }
+
+    /* App chrome and on-screen-only helpers don't belong in a handout */
+    .navbar, .footer, .guide-toc, .guide-back-top { display: none !important; }
+
+    .main-content { padding: 0 !important; max-width: 100% !important; }
+    .guide { max-width: 100% !important; margin: 0 !important; }
+
+    /* Keep atomic blocks from splitting awkwardly across pages */
+    .guide-section > h2 { break-after: avoid; }
+    .guide-figure,
+    .guide-callout,
+    .guide-legend-item,
+    .guide-steps > li { break-inside: avoid; page-break-inside: avoid; }
+
+    /* Bound screenshot height so a figure fits on a page with its heading/steps
+       instead of being bumped to a page of its own (avoids large gaps). */
+    .guide-figure { text-align: center; }
+    .guide-figure img {
+        box-shadow: none;
+        width: auto;
+        height: auto;
+        max-width: 100%;
+        max-height: 185mm;
+    }
+
+    a { color: var(--color-accent); }
+}
+
