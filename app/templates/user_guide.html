@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}User Guide - Related Document Server{% endblock %}
+
+{% block content %}
+<div class="guide" id="top">
+    <header class="page-header">
+        <h1>User Guide</h1>
+        <p class="subtitle">Everything you need to use the Document Server — step by step.</p>
+    </header>
+
+    <div class="guide-intro">
+        <h2>What is this system?</h2>
+        <p>
+            The Related Document Server keeps all your scanned student documents —
+            <strong>Certificates</strong> and <strong>POEs (Grade Books)</strong> — in one place.
+            When you add a document, the system reads it automatically and pulls out the
+            important details (student name, course, ID number, date). You can then
+            <strong>search</strong> for any document in seconds, and quickly
+            <strong>check</strong> anything the system wasn't sure about.
+        </p>
+        <p style="margin-bottom:0;">
+            You don't need any technical knowledge. This guide walks you through each task
+            with pictures. Use the quick links below to jump to what you need.
+        </p>
+    </div>
+
+    <!-- Quick links -->
+    <nav class="guide-toc" aria-label="Guide contents">
+        <a href="#around"><span class="toc-icon">🧭</span> Finding your way around</a>
+        <a href="#upload-one"><span class="toc-icon">📤</span> Upload one document</a>
+        <a href="#upload-many"><span class="toc-icon">🗂️</span> Upload many at once</a>
+        <a href="#review"><span class="toc-icon">📝</span> Check &amp; fix documents</a>
+        <a href="#search"><span class="toc-icon">🔍</span> Find a document</a>
+        <a href="#labels"><span class="toc-icon">🏷️</span> What the labels mean</a>
+        <a href="#settings"><span class="toc-icon">⚙️</span> Settings (for admins)</a>
+        <a href="#help"><span class="toc-icon">💬</span> Need help?</a>
+    </nav>
+
+    <!-- Around -->
+    <section class="guide-section" id="around">
+        <h2>🧭 Finding your way around</h2>
+        <p>
+            Along the top of every page is the menu. These are the only places you'll ever need:
+        </p>
+        <ul class="guide-steps">
+            <li><strong>Dashboard</strong><p>The home page. See recent documents, how many need review, and add new documents.</p></li>
+            <li><strong>Search</strong><p>Find any document by student, course, ID number, or date.</p></li>
+            <li><strong>Review Queue</strong><p>The list of documents the system wasn't fully sure about, waiting for you to check.</p></li>
+            <li><strong>Settings</strong><p>For administrators — set up document types and the reader. You can usually ignore this.</p></li>
+        </ul>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/dashboard.png" alt="The Dashboard page showing statistics, recent documents, and upload areas">
+            <figcaption>The Dashboard — your home base. The menu is along the top.</figcaption>
+        </figure>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Upload one -->
+    <section class="guide-section" id="upload-one">
+        <h2>📤 Upload one document</h2>
+        <p>The quickest way to add a single Certificate or POE:</p>
+        <ol class="guide-steps">
+            <li><strong>Go to the Dashboard</strong><p>Click <em>Dashboard</em> in the top menu.</p></li>
+            <li><strong>Scroll down to “Upload Document”</strong></li>
+            <li><strong>Choose the document type</strong><p>Pick <em>POE (Grade Books)</em> or <em>Certificates</em> from the drop-down.</p></li>
+            <li><strong>Add your file</strong><p>Drag the file onto the box, or click the box to browse your computer. PDF, PNG, JPG and TIFF files all work.</p></li>
+            <li><strong>Wait a moment</strong><p>The system reads the document and opens its details automatically. That's it — it's saved.</p></li>
+        </ol>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/upload-single.png" alt="The Upload Document area with a document type drop-down and a drag-and-drop box">
+            <figcaption>Choose the type, then drag your file into the box (or click to browse).</figcaption>
+        </figure>
+        <div class="guide-callout">
+            <span class="callout-icon">💡</span>
+            <p>After uploading, you'll land on the document's details page. If everything looks right, you're done. If a box is empty or wrong, just type the correct value and click <strong>Save Changes</strong>.</p>
+        </div>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Upload many -->
+    <section class="guide-section" id="upload-many">
+        <h2>🗂️ Upload many at once (Bulk Upload)</h2>
+        <p>Have a whole stack to add? Bulk Upload handles them all — one at a time so nothing gets missed.</p>
+        <ol class="guide-steps">
+            <li><strong>Go to the Dashboard</strong><p>Scroll down to the <em>Bulk Upload</em> section (below the single upload).</p></li>
+            <li><strong>Select all your files</strong><p>Drag several files onto the box, or click it and hold <em>Ctrl</em> (or <em>Shift</em>) to pick many. Certificates and POEs can be mixed together — the system works out the type for you.</p></li>
+            <li><strong>Watch the progress</strong><p>Each file moves through the steps: <em>Uploading → Identify → OCR Reading → AI Reading → Done</em>. They process one after another.</p></li>
+            <li><strong>Check the results</strong><p>Each file ends with a green <strong>Approved</strong> or an orange <strong>Needs Review</strong> label. Click a label to open that document.</p></li>
+        </ol>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/upload-bulk.png" alt="The Bulk Upload area for dropping multiple documents at once">
+            <figcaption>Drop a whole batch here. Each file is processed and labelled automatically.</figcaption>
+        </figure>
+        <div class="guide-callout">
+            <span class="callout-icon">💡</span>
+            <p>Leave the page open until every file shows a result. Anything marked <strong>Needs Review</strong> will also appear in the <em>Review Queue</em> for you to fix later.</p>
+        </div>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Review -->
+    <section class="guide-section" id="review">
+        <h2>📝 Check &amp; fix documents (Review Queue)</h2>
+        <p>
+            Sometimes the system can't read a field clearly — for example, handwriting or a
+            missing ID number. Those documents wait in the <strong>Review Queue</strong> so you
+            can quickly put them right. Nothing is lost; they're just held for a human to confirm.
+        </p>
+        <ol class="guide-steps">
+            <li><strong>Open the Review Queue</strong><p>Click <em>Review Queue</em> in the top menu. Each row shows what's missing in the <em>Reason</em> column.</p></li>
+            <li><strong>Open a document</strong><p>Click the <em>Review</em> button on the right of the row.</p></li>
+            <li><strong>Compare with the scan</strong><p>The original scan is shown on the left. Read the details from it and fill in or correct the boxes on the right. Fields marked with a <strong>*</strong> are required.</p></li>
+            <li><strong>Save</strong><p>Click <strong>Save Changes</strong>. Once all required fields are filled, the document leaves the queue automatically and is filed away.</p></li>
+        </ol>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/review-queue.png" alt="The Review Queue table listing documents that need attention with a reason for each">
+            <figcaption>The Review Queue — the <em>Reason</em> column tells you what to fix.</figcaption>
+        </figure>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/document-view.png" alt="A document's details page with the scan on the left and editable fields on the right">
+            <figcaption>The details page — scan on the left, editable fields on the right. Correct anything, then Save Changes.</figcaption>
+        </figure>
+        <div class="guide-callout callout-warning">
+            <span class="callout-icon">⚠️</span>
+            <p>The <strong>Delete Document</strong> button removes a document permanently and can't be undone. Only use it if a file was uploaded by mistake.</p>
+        </div>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Search -->
+    <section class="guide-section" id="search">
+        <h2>🔍 Find a document</h2>
+        <p>The Search page finds any document already in the system.</p>
+        <ol class="guide-steps">
+            <li><strong>Click <em>Search</em> in the top menu</strong></li>
+            <li><strong>Type what you're looking for</strong><p>Use the big search box for anything — a name, a course, or an ID number. Or use the boxes below to search a specific field or a date range.</p></li>
+            <li><strong>Open a result</strong><p>Click <em>View</em> on any row to open that document.</p></li>
+        </ol>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/search.png" alt="The Search page with a search box and filters">
+            <figcaption>Search by anything, or narrow it down with the field boxes.</figcaption>
+        </figure>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Labels -->
+    <section class="guide-section" id="labels">
+        <h2>🏷️ What the labels mean</h2>
+        <p>You'll see these small coloured labels next to documents. Here's what each one means:</p>
+        <div class="guide-legend">
+            <div class="guide-legend-item">
+                <span class="review-badge review-badge-success">Complete</span>
+                <span class="legend-desc"><strong>Complete / Approved</strong> — all required details were found. Nothing for you to do.</span>
+            </div>
+            <div class="guide-legend-item">
+                <span class="review-badge">Needs Review</span>
+                <span class="legend-desc"><strong>Needs Review</strong> — a detail is missing or unclear. Open it, check it, and Save.</span>
+            </div>
+            <div class="guide-legend-item">
+                <span class="review-badge">⚠ AI error</span>
+                <span class="legend-desc"><strong>AI error</strong> — the automatic reader had a problem (for example, it couldn't connect). The document is safe — just fill the details in by hand. If this keeps happening, tell your administrator.</span>
+            </div>
+        </div>
+        <p>
+            On a document's details page you may also see <em>“Extraction: Rules only”</em> or
+            <em>“Rules + AI”</em>. This simply tells you whether the system needed its smart AI
+            reader for that document. It doesn't change anything you need to do.
+        </p>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Settings -->
+    <section class="guide-section" id="settings">
+        <h2>⚙️ Settings (for administrators)</h2>
+        <p>
+            Most people never need this page. Administrators use <strong>Settings</strong> to:
+        </p>
+        <ul class="guide-steps">
+            <li><strong>Manage document types</strong><p>Add or change the types (like POE and Certificate) and the fields each one collects.</p></li>
+            <li><strong>Set up the automatic reader (AI)</strong><p>Enter the reader's connection details and press <em>Test Connection</em> to confirm it's working.</p></li>
+        </ul>
+        <figure class="guide-figure">
+            <img src="/static/images/guide/settings.png" alt="The Settings page for managing document types and the AI reader">
+            <figcaption>Settings — for setting up document types and the automatic reader.</figcaption>
+        </figure>
+        <div class="guide-callout callout-warning">
+            <span class="callout-icon">⚠️</span>
+            <p>Changing settings affects everyone. If you're not sure, leave this page alone and ask your administrator.</p>
+        </div>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Help -->
+    <section class="guide-section" id="help">
+        <h2>💬 Need help?</h2>
+        <p>
+            If something doesn't look right, don't worry — nothing you do here can lose a document.
+            The safest steps are always: open the document, compare it with the scan on the left,
+            correct the boxes, and click <strong>Save Changes</strong>.
+        </p>
+        <p>
+            If a document keeps showing an <strong>AI error</strong>, or a page won't load,
+            contact your system administrator.
+        </p>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+</div>
+{% endblock %}

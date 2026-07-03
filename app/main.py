@@ -184,6 +184,16 @@ async def settings_page(request: Request):
     )
 
 
+@app.get("/guide", response_class=HTMLResponse)
+async def guide_page(request: Request):
+    """User guide page (how to use the system)."""
+    return templates.TemplateResponse(
+        request,
+        "user_guide.html",
+        {}
+    )
+
+
 @app.get("/documents/{document_id}", response_class=HTMLResponse)
 async def view_document(request: Request, document_id: str):
     """Document detail view page."""
