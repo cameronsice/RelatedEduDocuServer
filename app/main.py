@@ -17,6 +17,7 @@ from app.config import (
     SCAN_REVIEW_HOLD_PATH,
     MCP_ENABLED,
     MCP_AUTH_TOKEN,
+    MCP_ALLOWED_HOSTS,
 )
 from app.database import init_db, get_db, SessionLocal
 from app.routers import documents, search, document_types, settings as settings_router
@@ -49,9 +50,17 @@ mcp_instance = None
 _mcp_asgi_app = None
 if MCP_ENABLED and MCP_AUTH_TOKEN:
     from mcp_server.server import mcp as mcp_instance
+    from mcp.server.transport_security import TransportSecuritySettings
 
     # Serve at exactly /mcp (mount path) rather than /mcp/mcp.
     mcp_instance.settings.streamable_http_path = "/"
+    # The SDK's DNS-rebinding protection defaults to localhost-only, which 421s
+    # LAN clients connecting by IP. Allow the host(s) clients actually use. The
+    # /mcp bearer-token middleware remains the real authentication gate.
+    mcp_instance.settings.transport_security = TransportSecuritySettings(
+        allowed_hosts=MCP_ALLOWED_HOSTS,
+        allowed_origins=[f"http://{h}" for h in MCP_ALLOWED_HOSTS],
+    )
     _mcp_asgi_app = mcp_instance.streamable_http_app()
     logger.info("MCP server enabled — will mount at /mcp")
 elif MCP_ENABLED and not MCP_AUTH_TOKEN:

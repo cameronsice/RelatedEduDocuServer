@@ -67,6 +67,10 @@ POPPLER_PATH = os.getenv("POPPLER_PATH", "").strip() or None
 MCP_ENABLED = os.getenv("MCP_ENABLED", "false").lower() == "true"
 MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "").strip()
 
+# Hosts the mounted MCP endpoint will accept (SDK DNS-rebinding allow-list).
+# Comma-separated "host:port" values; must include how clients address this box.
+MCP_ALLOWED_HOSTS = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "192.168.88.25:8000").split(",") if h.strip()]
+
 # Supported file extensions for scanning
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp"}
 
