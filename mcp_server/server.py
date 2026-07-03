@@ -2,21 +2,32 @@
 
 Exposes the document server's capabilities to AI agents over the Model Context
 Protocol: search, read, upload (single + bulk), correct/review documents, and
-inspect the type schema and AI status. It is a thin stdio client over the REST
-API — configure the target with the ``RDS_BASE_URL`` environment variable
-(defaults to the live server, ``http://192.168.88.25:8000/``).
+inspect the type schema and AI status. It is a thin client over the REST API —
+configure the target with the ``RDS_BASE_URL`` environment variable (defaults to
+the live server, ``http://192.168.88.25:8000/``).
 
-Run:
-    python -m mcp_server.server        # from the project root
-    # or, installed:  related-docs-mcp
+Two ways to run it:
+
+* **stdio** (per-user, local subprocess)::
+
+      python -m mcp_server.server
+
+* **hosted** — the same ``mcp`` object is imported and mounted onto the web app
+  at ``/mcp`` (streamable HTTP); see ``app.main``. In that mode the tools run on
+  the web app's event loop, so every tool offloads its blocking HTTP call to a
+  worker thread (``_run``) to avoid stalling the loop (the client calls loop
+  back into the same server).
 """
 
 from __future__ import annotations
 
+import base64
+import functools
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
+import anyio
 from mcp.server.fastmcp import FastMCP, Image
 
 from mcp_server.client import BASE_URL, APIError, DocumentServerClient
@@ -25,6 +36,17 @@ mcp = FastMCP("related-document-server")
 
 # One shared client for the process lifetime.
 client = DocumentServerClient()
+
+
+async def _run(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run a blocking client call in a worker thread.
+
+    Tools are invoked directly on the caller's event loop by FastMCP. When this
+    server is mounted inside the web app, the client's HTTP calls loop back into
+    that same loop, so calling them inline would deadlock. Offloading to a thread
+    keeps the loop free to service the request. Harmless in stdio mode too.
+    """
+    return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
 
 
 def _pretty(data: Any) -> str:
@@ -64,7 +86,7 @@ def _summarize_document(doc: dict) -> dict:
 
 
 @mcp.tool()
-def search_documents(
+async def search_documents(
     query: Optional[str] = None,
     student_name: Optional[str] = None,
     course_name: Optional[str] = None,
@@ -83,7 +105,8 @@ def search_documents(
     document date (``YYYY-MM-DD``). Returns a paginated list of document
     summaries with a ``total`` count.
     """
-    result = client.search(
+    result = await _run(
+        client.search,
         {
             "query": query,
             "student_name": student_name,
@@ -94,35 +117,35 @@ def search_documents(
             "date_to": date_to,
             "page": page,
             "page_size": page_size,
-        }
+        },
     )
     result["documents"] = [_summarize_document(d) for d in result.get("documents", [])]
     return _pretty(result)
 
 
 @mcp.tool()
-def list_recent_documents(page: int = 1, page_size: int = 20) -> str:
+async def list_recent_documents(page: int = 1, page_size: int = 20) -> str:
     """List the most recently processed documents (newest first), paginated."""
-    result = client.list_documents(page=page, page_size=page_size)
+    result = await _run(client.list_documents, page=page, page_size=page_size)
     result["documents"] = [_summarize_document(d) for d in result.get("documents", [])]
     return _pretty(result)
 
 
 @mcp.tool()
-def get_document(document_id: str) -> str:
+async def get_document(document_id: str) -> str:
     """Get the full record for one document by its ID.
 
     Includes all core and custom fields, review status and reason, whether the
     AI tier ran, any extraction error, and the full OCR text.
     """
-    return _pretty(client.get_document(document_id))
+    return _pretty(await _run(client.get_document, document_id))
 
 
 @mcp.tool()
-def get_document_preview(document_id: str, page: int = 1) -> Image:
+async def get_document_preview(document_id: str, page: int = 1) -> Image:
     """Return a rendered image of a document page (1-based) so you can read the
     actual scan. Useful to verify or hand-fill fields the extractor missed."""
-    data = client.get_preview(document_id, page)
+    data = await _run(client.get_preview, document_id, page)
     return Image(data=data, format="jpeg")
 
 
@@ -132,33 +155,62 @@ def get_document_preview(document_id: str, page: int = 1) -> Image:
 
 
 @mcp.tool()
-def upload_document(file_path: str, document_type: Optional[str] = None) -> str:
+async def upload_document(file_path: str, document_type: Optional[str] = None) -> str:
     """Upload a single local file and run the full extraction cascade.
 
-    ``file_path`` is an absolute path on the machine running this MCP server.
-    ``document_type`` optionally forces a type key (e.g. ``"poe"`` or
-    ``"certificate"``); omit it to let the server auto-identify. Returns the
-    processed document, including whether it was approved or routed to review.
+    ``file_path`` is an absolute path **on the machine running this MCP server**.
+    In stdio mode that is the user's own machine; when this server is hosted
+    remotely the path is on the *server* — remote callers should use
+    ``upload_document_content`` instead. ``document_type`` optionally forces a
+    type key (e.g. ``"poe"`` or ``"certificate"``); omit it to let the server
+    auto-identify. Returns the processed document, including whether it was
+    approved or routed to review.
     """
-    doc = client.upload(Path(file_path), document_type=document_type)
+    doc = await _run(client.upload, Path(file_path), document_type=document_type)
     return _pretty(_summarize_document(doc))
 
 
 @mcp.tool()
-def bulk_upload_documents(file_paths: list[str]) -> str:
+async def upload_document_content(
+    filename: str,
+    content_base64: str,
+    document_type: Optional[str] = None,
+) -> str:
+    """Upload a document by its base64-encoded content (works remotely).
+
+    Use this when the file is not on the server's own disk — e.g. when this MCP
+    server is hosted and you are connecting to it over the network. ``filename``
+    keeps the original name/extension (used for type sniffing); ``content_base64``
+    is the file's raw bytes, base64-encoded. ``document_type`` optionally forces
+    a type key; omit to auto-identify. Runs the same extraction cascade as
+    ``upload_document`` and returns the processed document.
+    """
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise APIError(f"content_base64 is not valid base64: {exc}") from exc
+    doc = await _run(
+        client.upload_bytes, filename, data, document_type=document_type
+    )
+    return _pretty(_summarize_document(doc))
+
+
+@mcp.tool()
+async def bulk_upload_documents(file_paths: list[str]) -> str:
     """Upload many local files, processed one at a time (serially).
 
     Each file goes through the full cascade with auto-identified type. Returns a
     per-file result summary — type, key fields, whether it was approved or sent
     to review, whether AI ran, and any error — plus counts. Use this to ingest a
-    batch and then review the outputs (see ``list_review_queue``).
+    batch and then review the outputs (see ``list_review_queue``). Paths are on
+    the machine running this MCP server (see ``upload_document``).
     """
     results = []
     approved = review = failed = 0
     for raw in file_paths:
         path = Path(raw)
         try:
-            event = client.bulk_upload(path)
+            event = await _run(client.bulk_upload, path)
         except APIError as exc:
             failed += 1
             results.append({"file": path.name, "result": "error", "error": str(exc)})
@@ -209,20 +261,20 @@ def bulk_upload_documents(file_paths: list[str]) -> str:
 
 
 @mcp.tool()
-def list_review_queue(page: int = 1, page_size: int = 20) -> str:
+async def list_review_queue(page: int = 1, page_size: int = 20) -> str:
     """List documents that need manual review, each with its review reason.
 
     A document lands here when a required field is missing, AI confidence was
     low, or the AI call errored (``extraction_error`` set). Correct it with
     ``update_document`` — filling the required fields moves it out of the queue.
     """
-    result = client.review_queue(page=page, page_size=page_size)
+    result = await _run(client.review_queue, page=page, page_size=page_size)
     result["documents"] = [_summarize_document(d) for d in result.get("documents", [])]
     return _pretty(result)
 
 
 @mcp.tool()
-def update_document(
+async def update_document(
     document_id: str,
     student_name: Optional[str] = None,
     course_name: Optional[str] = None,
@@ -252,7 +304,7 @@ def update_document(
         "student_id": student_id,
         "custom_fields": custom_fields,
     }
-    doc = client.update_document(document_id, payload)
+    doc = await _run(client.update_document, document_id, payload)
     return _pretty(_summarize_document(doc))
 
 
@@ -262,7 +314,7 @@ def update_document(
 
 
 @mcp.tool()
-def list_document_types() -> str:
+async def list_document_types() -> str:
     """List the configured document types and their fields.
 
     This is the schema to read before filling fields: each type lists its fields
@@ -270,33 +322,33 @@ def list_document_types() -> str:
     field is ``required``, and the type's ``max_pages``. Use these keys with
     ``upload_document`` (``document_type``) and ``update_document``
     (``custom_fields``)."""
-    return _pretty(client.document_types())
+    return _pretty(await _run(client.document_types))
 
 
 @mcp.tool()
-def get_ai_status() -> str:
+async def get_ai_status() -> str:
     """Show the current AI extraction configuration (read-only).
 
     Returns whether AI is enabled, the provider, model, and base URL, and
     whether an API key is set. The API key value itself is never exposed."""
-    return _pretty(client.ai_status())
+    return _pretty(await _run(client.ai_status))
 
 
 @mcp.tool()
-def test_ai_connection() -> str:
+async def test_ai_connection() -> str:
     """Test connectivity to the configured AI model.
 
     Sends a tiny prompt and returns ``ok``, the model, its response, and
     latency. Use this to diagnose extraction failures seen in the review queue."""
-    return _pretty(client.ai_test())
+    return _pretty(await _run(client.ai_test))
 
 
 @mcp.tool()
-def server_health() -> str:
+async def server_health() -> str:
     """Check that the document server is reachable and report its status,
     including the target base URL this MCP server is pointed at."""
     try:
-        health = client.health()
+        health = await _run(client.health)
     except APIError as exc:
         return _pretty({"reachable": False, "base_url": BASE_URL, "error": str(exc)})
     return _pretty({"reachable": True, "base_url": BASE_URL, "health": health})

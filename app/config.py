@@ -60,6 +60,13 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 TESSERACT_CMD = os.getenv("TESSERACT_CMD", "").strip()
 POPPLER_PATH = os.getenv("POPPLER_PATH", "").strip() or None
 
+# MCP server (hosted, optional). When MCP_ENABLED is true AND MCP_AUTH_TOKEN is
+# set, the app mounts the MCP server at /mcp (streamable HTTP). Clients must send
+# `Authorization: Bearer <MCP_AUTH_TOKEN>`. If the token is blank the mount is
+# skipped (fail-safe: never expose write tools unauthenticated).
+MCP_ENABLED = os.getenv("MCP_ENABLED", "false").lower() == "true"
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "").strip()
+
 # Supported file extensions for scanning
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp"}
 

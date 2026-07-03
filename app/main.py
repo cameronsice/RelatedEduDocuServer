@@ -1,13 +1,13 @@
 """Main FastAPI application entry point."""
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import (
     DEBUG,
@@ -15,6 +15,8 @@ from app.config import (
     STORAGE_PATH,
     SCAN_PROCESSED_PATH,
     SCAN_REVIEW_HOLD_PATH,
+    MCP_ENABLED,
+    MCP_AUTH_TOKEN,
 )
 from app.database import init_db, get_db, SessionLocal
 from app.routers import documents, search, document_types, settings as settings_router
@@ -37,6 +39,23 @@ STATIC_DIR = APP_DIR.parent / "static"
 # Ensure directories exist
 TEMPLATES_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
+
+# Optional hosted MCP server. Only imported/mounted when explicitly enabled AND
+# a token is configured, so the web app has no hard dependency on the `mcp`
+# package otherwise, and write tools are never exposed unauthenticated. The MCP
+# instance's tools loop back into this same app over HTTP (RDS_BASE_URL), which
+# is why they offload to worker threads (see mcp_server.server._run).
+mcp_instance = None
+_mcp_asgi_app = None
+if MCP_ENABLED and MCP_AUTH_TOKEN:
+    from mcp_server.server import mcp as mcp_instance
+
+    # Serve at exactly /mcp (mount path) rather than /mcp/mcp.
+    mcp_instance.settings.streamable_http_path = "/"
+    _mcp_asgi_app = mcp_instance.streamable_http_app()
+    logger.info("MCP server enabled — will mount at /mcp")
+elif MCP_ENABLED and not MCP_AUTH_TOKEN:
+    logger.warning("MCP_ENABLED is true but MCP_AUTH_TOKEN is empty — MCP NOT mounted")
 
 
 def document_processor(file_path: Path):
@@ -101,9 +120,15 @@ async def lifespan(app: FastAPI):
     
     logger.info(f"Watching for scans in: {SCAN_FOLDER_PATH}")
     logger.info(f"Storing documents in: {STORAGE_PATH}")
-    
-    yield
-    
+
+    async with AsyncExitStack() as stack:
+        # The streamable-HTTP session manager must be running for the mounted
+        # /mcp app to serve sessions. Runs only while the app serves traffic.
+        if mcp_instance is not None:
+            await stack.enter_async_context(mcp_instance.session_manager.run())
+            logger.info("MCP server mounted at /mcp (streamable HTTP)")
+        yield
+
     # Shutdown
     logger.info("Shutting down...")
     file_watcher_service.stop()
@@ -128,6 +153,24 @@ app.include_router(documents.router)
 app.include_router(search.router)
 app.include_router(document_types.router)
 app.include_router(settings_router.router)
+
+
+# Mount the hosted MCP server behind a bearer-token gate. The token guards every
+# /mcp request; the rest of the app (web UI, REST API) is unaffected.
+if _mcp_asgi_app is not None:
+
+    @app.middleware("http")
+    async def _mcp_auth(request: Request, call_next):
+        path = request.url.path
+        if path == "/mcp" or path.startswith("/mcp/"):
+            if request.headers.get("authorization") != f"Bearer {MCP_AUTH_TOKEN}":
+                return JSONResponse(
+                    {"detail": "Unauthorized — send 'Authorization: Bearer <token>'"},
+                    status_code=401,
+                )
+        return await call_next(request)
+
+    app.mount("/mcp", _mcp_asgi_app)
 
 
 # Web UI Routes
@@ -186,11 +229,22 @@ async def settings_page(request: Request):
 
 @app.get("/guide", response_class=HTMLResponse)
 async def guide_page(request: Request):
-    """User guide page (how to use the system)."""
+    """User guide page (how to use the system).
+
+    The MCP connection token is injected from config at render time rather than
+    hard-coded in the template, so the live page can show the real token while
+    the source (and git history) never contain the secret. The MCP URL is
+    derived from the request host so it stays correct regardless of IP.
+    """
+    base = str(request.base_url).rstrip("/")
     return templates.TemplateResponse(
         request,
         "user_guide.html",
-        {}
+        {
+            "mcp_enabled": MCP_ENABLED and bool(MCP_AUTH_TOKEN),
+            "mcp_url": f"{base}/mcp",
+            "mcp_token": MCP_AUTH_TOKEN,
+        },
     )
 
 
