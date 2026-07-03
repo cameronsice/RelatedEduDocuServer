@@ -11,3 +11,6 @@ openai>=1.3.0
 python-dotenv>=1.0.0
 jinja2>=3.1.2
 aiofiles>=23.2.1
+# Only needed when the hosted MCP server is enabled (MCP_ENABLED=true); imported
+# lazily in app.main so it is otherwise optional.
+mcp>=1.2.0

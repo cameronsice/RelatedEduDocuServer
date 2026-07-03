@@ -42,6 +42,7 @@
         <a href="#labels"><span class="toc-icon">🏷️</span> What the labels mean</a>
         <a href="#types"><span class="toc-icon">🧩</span> Add your own document types</a>
         <a href="#ai-reader"><span class="toc-icon">⚙️</span> The automatic reader</a>
+        <a href="#mcp"><span class="toc-icon">🤖</span> Connect an AI assistant</a>
         <a href="#help"><span class="toc-icon">💬</span> Need help?</a>
     </nav>
 
@@ -243,6 +244,106 @@
         <div class="guide-callout callout-warning">
             <span class="callout-icon">⚠️</span>
             <p>These settings affect everyone. If the AI reader isn't set up, documents that need it simply go to the Review Queue to be filled in by hand — nothing is lost.</p>
+        </div>
+        <a class="guide-back-top" href="#top">↑ Back to top</a>
+    </section>
+
+    <!-- Connect an AI assistant (MCP) -->
+    <section class="guide-section" id="mcp">
+        <h2>🤖 Connect an AI assistant (MCP)</h2>
+        <p>
+            You can connect an AI assistant — like <strong>Claude</strong> — straight to the
+            Document Server, so you can just <em>ask it</em> to find, read, add and tidy up
+            documents for you in plain language. Behind the scenes this uses an open standard
+            called <strong>MCP</strong> (Model Context Protocol). You don't install anything on
+            the server — you point your assistant at one web address and it can do the rest.
+        </p>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">What it can do for you</h3>
+        <ul class="guide-steps">
+            <li><strong>Find &amp; read</strong><p>Search documents, open a full record, and even look at the actual scan.</p></li>
+            <li><strong>Add documents</strong><p>Upload a single file or a whole batch — the assistant sends them through the same automatic reader as the website.</p></li>
+            <li><strong>Work the review queue</strong><p>List what needs review and fill in or correct the details, which files the document away.</p></li>
+            <li><strong>Check the setup</strong><p>See the document types and whether the automatic reader is connected.</p></li>
+        </ul>
+        <div class="guide-callout">
+            <span class="callout-icon">💡</span>
+            <p>For your safety there is <strong>no “delete” action</strong> over this connection — the assistant can add and correct documents, but it can't remove them.</p>
+        </div>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">What you need</h3>
+        <ul class="guide-steps">
+            <li><strong>An MCP-capable app</strong><p>e.g. Claude Code, Claude Desktop, or Cursor.</p></li>
+            <li><strong>To be on the same network</strong><p>Your computer must be able to reach the server (the office network / VPN).</p></li>
+            <li><strong>The access token</strong>{% if mcp_token %}<p>A shared password-like key. It's already filled into the setup commands below — just copy them.</p>{% else %}<p>A shared password-like key. <strong>Ask your administrator for it.</strong></p>{% endif %}</li>
+        </ul>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">Connection details</h3>
+        <p>These are the three things any AI app will ask for.{% if not mcp_token %} Wherever you see <code>&lt;TOKEN&gt;</code>, paste the token your administrator gave you.{% endif %}</p>
+        <dl class="guide-connect">
+            <dt>Server URL</dt><dd>{{ mcp_url or 'http://192.168.88.25:8000/mcp' }}</dd>
+            <dt>Transport</dt><dd>HTTP (streamable)</dd>
+            <dt>Auth header</dt><dd>Authorization: Bearer {{ mcp_token or '<TOKEN>' }}</dd>
+        </dl>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">Set it up in Claude Code</h3>
+        <p>Run this one command (replace <code>&lt;TOKEN&gt;</code> with your token):</p>
+        <div class="guide-code">
+            <span class="guide-code-label">Terminal — Claude Code</span>
+            <pre><code>claude mcp add --transport http related-documents \
+  {{ mcp_url or 'http://192.168.88.25:8000/mcp' }} \
+  --header "Authorization: Bearer <span class="tok">{{ mcp_token or '<TOKEN>' }}</span>"</code></pre>
+        </div>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">Set it up in Claude Desktop (or other apps)</h3>
+        <p>
+            Add this to your app's MCP configuration file (in Claude Desktop:
+            <em>Settings → Developer → Edit Config</em>). It uses a small helper,
+            <code>mcp-remote</code>, to reach the server:
+        </p>
+        <div class="guide-code">
+            <span class="guide-code-label">claude_desktop_config.json</span>
+            <pre><code>{
+  "mcpServers": {
+    "related-documents": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "{{ mcp_url or 'http://192.168.88.25:8000/mcp' }}",
+        "--header", "Authorization: Bearer <span class="tok">{{ mcp_token or '<TOKEN>' }}</span>"
+      ]
+    }
+  }
+}</code></pre>
+        </div>
+        <p>Restart the app afterwards. The tools then appear under <strong>related-documents</strong>.</p>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">…or just tell your assistant</h3>
+        <p>If your assistant can set up its own tools, you can simply paste it this:</p>
+        <div class="guide-code">
+            <span class="guide-code-label">Paste to your AI assistant</span>
+            <pre><code>Please connect to an MCP server over HTTP.
+Name: related-documents
+URL: {{ mcp_url or 'http://192.168.88.25:8000/mcp' }}
+Header: Authorization: Bearer <span class="tok">{{ mcp_token or '<TOKEN>' }}</span>
+Then run the "server_health" tool and tell me if it's reachable.</code></pre>
+        </div>
+
+        <h3 style="margin: var(--spacing-lg) 0 var(--spacing-md);">Check it worked</h3>
+        <p>
+            Ask your assistant to <em>“run server_health”</em>. It should reply that the
+            server is <strong>reachable</strong>. Then try <em>“search for documents for
+            student … ”</em> — if it lists results, you're connected.
+        </p>
+
+        <div class="guide-callout callout-warning">
+            <span class="callout-icon">⚠️</span>
+            <p>
+                The token is like a password: anyone who has it and can reach the server can
+                read and change documents. Get it from your administrator, keep it to yourself,
+                and don't post it outside the organisation. If it's ever exposed, an
+                administrator can issue a new one.
+            </p>
         </div>
         <a class="guide-back-top" href="#top">↑ Back to top</a>
     </section>

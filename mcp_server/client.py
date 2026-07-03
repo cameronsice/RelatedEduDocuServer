@@ -119,6 +119,24 @@ class DocumentServerClient:
         )
         return resp.json()
 
+    def upload_bytes(
+        self, filename: str, data: bytes, document_type: Optional[str] = None
+    ) -> dict:
+        """Upload raw file bytes (for remote/hosted use where there is no local path).
+
+        Same endpoint as :meth:`upload`, but the caller supplies the content
+        directly instead of a path readable by this process.
+        """
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        form = {"document_type": document_type} if document_type else None
+        resp = self._request(
+            "POST",
+            "/api/documents/upload/manual",
+            files={"file": (filename, data, content_type)},
+            data=form,
+        )
+        return resp.json()
+
     def bulk_upload(self, path: Path) -> dict:
         """Upload one file to the streaming endpoint; return the final event.
 
