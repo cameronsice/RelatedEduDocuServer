@@ -42,7 +42,32 @@
             </div>
         </div>
 
+        <h3>Auto-identification</h3>
+        <p class="field-hint">How scanned files are matched to this type. Types are checked in order; the first match wins. If nothing matches, AI classification (if enabled) or the default type is used.</p>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="type-filename-patterns">Filename contains</label>
+                <input type="text" id="type-filename-patterns" placeholder="e.g. _ID_, _Agreement_">
+                <p class="field-hint">Comma-separated, case-insensitive.</p>
+            </div>
+            <div class="form-group">
+                <label for="type-detect-keywords">First page text contains</label>
+                <input type="text" id="type-detect-keywords" placeholder="e.g. certificate issued">
+                <p class="field-hint">Comma-separated phrases found by OCR.</p>
+            </div>
+            <div class="form-group">
+                <label for="type-ai-input">AI reads</label>
+                <select id="type-ai-input">
+                    <option value="text_then_images">OCR text first, images only if needed</option>
+                    <option value="text">OCR text only (cheapest)</option>
+                    <option value="images">Page images straight away (handwriting)</option>
+                </select>
+                <p class="field-hint">Page images cost far more than text.</p>
+            </div>
+        </div>
+
         <h3>Fields</h3>
+        <p class="field-hint">Click a field name to edit its label, the labels it appears under on the page (helps the free rules step), and a hint for the AI.</p>
         <div class="fields-editor" id="fields-editor"></div>
 
         <div class="add-field-controls">
@@ -86,10 +111,13 @@
                     <label for="ai-provider">Provider</label>
                     <select id="ai-provider">
                         <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic (Claude)</option>
+                        <option value="xai">xAI (Grok)</option>
                         <option value="azure-openai">Azure OpenAI</option>
                         <option value="local">Local / self-hosted</option>
                         <option value="custom">Custom (OpenAI-compatible)</option>
                     </select>
+                    <p class="field-hint" id="ai-provider-hint"></p>
                 </div>
                 <div class="form-group">
                     <label for="ai-model">Model</label>
@@ -107,6 +135,31 @@
                     <p class="field-hint" id="ai-key-status"></p>
                 </div>
             </div>
+
+            <h3>Cost guards</h3>
+            <p class="field-hint">AI only runs when the free rules step leaves a required field empty. These caps bound what a bad day can cost.</p>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="ai-daily-limit">Max AI calls per day</label>
+                    <input type="number" id="ai-daily-limit" min="0" step="1">
+                    <p class="field-hint">0 = unlimited. When reached, documents go to the review queue instead.</p>
+                </div>
+                <div class="form-group">
+                    <label for="ai-text-max">OCR characters per call</label>
+                    <input type="number" id="ai-text-max" min="500" step="500">
+                    <p class="field-hint">Roughly 4 characters per token.</p>
+                </div>
+                <div class="form-group">
+                    <label for="ai-max-images">Max page images per call</label>
+                    <input type="number" id="ai-max-images" min="1" step="1">
+                    <p class="field-hint">Also capped by each type's max pages.</p>
+                </div>
+                <div class="form-group form-group-check">
+                    <label><input type="checkbox" id="ai-classify"> Use AI to identify the type when no rule matches</label>
+                    <p class="field-hint">One small text-only call per unidentified document.</p>
+                </div>
+            </div>
+            <p class="field-hint" id="ai-usage-today"></p>
             <div class="form-actions">
                 <button type="button" id="save-ai-btn" class="btn btn-primary">Save AI Settings</button>
                 <button type="button" id="test-ai-btn" class="btn btn-secondary">Test Connection</button>
@@ -166,13 +219,16 @@ document.addEventListener('DOMContentLoaded', function () {
         const fieldsHtml = t.fields.map((f) => `
             <li>
                 <span class="field-name">${esc(f.label)}</span>
-                <span class="field-meta">${esc(f.data_type)}${f.source === 'custom' ? ' · custom' : ''}${f.required ? ' · required' : ''}${!f.visible ? ' · hidden' : ''}</span>
+                <span class="field-meta">${esc(f.data_type)}${f.source === 'custom' ? ' · custom' : ''}${f.required ? ' · required' : ''}${!f.visible ? ' · hidden' : ''}${f.handwritten ? ' · handwritten' : ''}</span>
             </li>`).join('');
         card.innerHTML = `
             <div class="type-card-head">
                 <div class="type-card-titles">
                     <span class="type-card-title">${esc(t.label)}</span>
-                    <span class="type-card-key">${esc(t.key)} · ${t.max_pages} pg</span>
+                    <span class="type-card-key">${esc(t.key)} · ${t.max_pages} pg · AI: ${esc({ text: 'text only', images: 'images', text_then_images: 'text, then images' }[t.ai_input] || t.ai_input)}</span>
+                    ${(t.filename_patterns || []).length || (t.detect_keywords || []).length
+                        ? `<span class="type-card-key">detect: ${esc([...(t.filename_patterns || []).map((p) => 'file~' + p), ...(t.detect_keywords || [])].join(', '))}</span>`
+                        : '<span class="type-card-key badge-inactive">no auto-detect rules</span>'}
                     ${t.is_active ? '' : '<span class="badge-inactive">inactive</span>'}
                 </div>
                 <div class="type-card-actions">
@@ -193,6 +249,9 @@ document.addEventListener('DOMContentLoaded', function () {
         keyInput.value = t ? t.key : '';
         keyInput.disabled = !!t;
         document.getElementById('type-max-pages').value = t ? (t.max_pages || 1) : 1;
+        document.getElementById('type-filename-patterns').value = t ? (t.filename_patterns || []).join(', ') : '';
+        document.getElementById('type-detect-keywords').value = t ? (t.detect_keywords || []).join(', ') : '';
+        document.getElementById('type-ai-input').value = t ? (t.ai_input || 'text_then_images') : 'text_then_images';
         activeInput.checked = t ? t.is_active : true;
         editFields = t ? t.fields.map((f) => Object.assign({}, f)) : [];
         renderFieldsEditor();
@@ -211,17 +270,32 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         editFields.forEach((f, i) => {
             const row = document.createElement('div');
-            row.className = 'field-row';
+            row.className = 'field-row field-row-editable';
+            const aliases = (f.aliases || []).join(', ');
             row.innerHTML = `
-                <span class="fr-label">${esc(f.label)}</span>
-                <span class="fr-type">${esc(f.data_type)}${f.source === 'custom' ? ' (custom)' : ''}</span>
-                <label class="fr-check"><input type="checkbox" data-i="${i}" data-k="required" ${f.required ? 'checked' : ''}> required</label>
-                <label class="fr-check"><input type="checkbox" data-i="${i}" data-k="visible" ${f.visible ? 'checked' : ''}> visible</label>
-                <button type="button" class="btn btn-small btn-danger fr-remove" data-i="${i}">✕</button>`;
+                <div class="fr-main">
+                    <input type="text" class="fr-label-input" data-i="${i}" data-k="label" value="${esc(f.label)}" title="Field label">
+                    <span class="fr-type">${esc(f.data_type)}${f.source === 'custom' ? ' (custom)' : ''}</span>
+                    <label class="fr-check"><input type="checkbox" data-i="${i}" data-k="required" ${f.required ? 'checked' : ''}> required</label>
+                    <label class="fr-check"><input type="checkbox" data-i="${i}" data-k="visible" ${f.visible ? 'checked' : ''}> visible</label>
+                    <label class="fr-check" title="Skip text rules for this field; the AI reads it from the page image"><input type="checkbox" data-i="${i}" data-k="handwritten" ${f.handwritten ? 'checked' : ''}> handwritten</label>
+                    <button type="button" class="btn btn-small btn-danger fr-remove" data-i="${i}">✕</button>
+                </div>
+                <div class="fr-hints">
+                    <input type="text" class="fr-hint-input" data-i="${i}" data-k="aliases" value="${esc(aliases)}" placeholder="Also labelled as (comma-separated), e.g. Employer registered name">
+                    <input type="text" class="fr-hint-input" data-i="${i}" data-k="description" value="${esc(f.description || '')}" placeholder="Hint for the AI, e.g. the learner's full name as printed on page 1">
+                </div>`;
             fieldsEditor.appendChild(row);
         });
         fieldsEditor.querySelectorAll('input[type=checkbox]').forEach((cb) => {
             cb.addEventListener('change', () => { editFields[+cb.dataset.i][cb.dataset.k] = cb.checked; });
+        });
+        fieldsEditor.querySelectorAll('input[type=text]').forEach((inp) => {
+            inp.addEventListener('input', () => {
+                const f = editFields[+inp.dataset.i];
+                if (inp.dataset.k === 'aliases') f.aliases = inp.value.split(',').map((s) => s.trim()).filter(Boolean);
+                else f[inp.dataset.k] = inp.value;
+            });
         });
         fieldsEditor.querySelectorAll('.fr-remove').forEach((btn) => {
             btn.addEventListener('click', () => { editFields.splice(+btn.dataset.i, 1); renderFieldsEditor(); refreshCoreSelect(); });
@@ -263,7 +337,15 @@ document.addEventListener('DOMContentLoaded', function () {
             label: label,
             is_active: activeInput.checked,
             max_pages: parseInt(document.getElementById('type-max-pages').value, 10) || 1,
-            fields: editFields.map((f) => ({ key: f.key, label: f.label, data_type: f.data_type, required: f.required, visible: f.visible })),
+            filename_patterns: document.getElementById('type-filename-patterns').value.split(',').map((s) => s.trim()).filter(Boolean),
+            detect_keywords: document.getElementById('type-detect-keywords').value.split(',').map((s) => s.trim()).filter(Boolean),
+            ai_input: document.getElementById('type-ai-input').value,
+            fields: editFields.map((f) => ({
+                key: f.key, label: (f.label || '').trim() || f.key, data_type: f.data_type,
+                required: f.required, visible: f.visible,
+                description: f.description || '', aliases: f.aliases || [],
+                handwritten: !!f.handwritten,
+            })),
         };
         let url = API, method = 'POST';
         if (editingKey) { url = `${API}/${editingKey}`; method = 'PUT'; }
@@ -296,8 +378,40 @@ document.addEventListener('DOMContentLoaded', function () {
             document.getElementById('ai-key-status').textContent = cfg.api_key_set
                 ? 'A key is currently set. Leave blank to keep it.'
                 : 'No key set.';
+            document.getElementById('ai-daily-limit').value = cfg.daily_call_limit ?? 2000;
+            document.getElementById('ai-text-max').value = cfg.text_max_chars ?? 6000;
+            document.getElementById('ai-max-images').value = cfg.max_images ?? 5;
+            document.getElementById('ai-classify').checked = !!cfg.classify_enabled;
+            const u = cfg.usage_today || {};
+            const limitText = cfg.daily_call_limit ? ` of ${cfg.daily_call_limit} allowed` : ' (no limit)';
+            document.getElementById('ai-usage-today').textContent =
+                `Today: ${u.calls || 0} AI call(s)${limitText} · ${(u.input_tokens || 0).toLocaleString()} input / ${(u.output_tokens || 0).toLocaleString()} output tokens.`;
+            updateProviderHint();
         } catch (e) { /* ignore */ }
     }
+
+    let providerPresets = {};
+    async function loadProviders() {
+        try {
+            const res = await fetch('/api/settings/ai/providers');
+            const data = await res.json();
+            (data.providers || []).forEach((p) => { providerPresets[p.key] = p; });
+        } catch (e) { /* ignore */ }
+    }
+    function updateProviderHint() {
+        const key = document.getElementById('ai-provider').value;
+        const p = providerPresets[key];
+        const hint = document.getElementById('ai-provider-hint');
+        const modelEl = document.getElementById('ai-model');
+        const urlEl = document.getElementById('ai-base-url');
+        if (!p) { hint.textContent = ''; return; }
+        modelEl.placeholder = p.model ? `default: ${p.model}` : 'model name';
+        urlEl.placeholder = p.base_url || (p.kind === 'anthropic' ? 'default: Anthropic API' : 'default: provider API');
+        hint.textContent = p.kind === 'anthropic'
+            ? 'Uses the official Anthropic SDK. Leave Base URL blank.'
+            : (p.base_url ? `Leave Base URL blank to use ${p.base_url}.` : 'OpenAI-compatible chat completions API.');
+    }
+    document.getElementById('ai-provider').addEventListener('change', updateProviderHint);
 
     document.getElementById('save-ai-btn').addEventListener('click', async () => {
         const payload = {
@@ -305,6 +419,10 @@ document.addEventListener('DOMContentLoaded', function () {
             provider: document.getElementById('ai-provider').value,
             model: document.getElementById('ai-model').value.trim(),
             base_url: document.getElementById('ai-base-url').value.trim(),
+            daily_call_limit: parseInt(document.getElementById('ai-daily-limit').value, 10) || 0,
+            text_max_chars: parseInt(document.getElementById('ai-text-max').value, 10) || 6000,
+            max_images: parseInt(document.getElementById('ai-max-images').value, 10) || 5,
+            classify_enabled: document.getElementById('ai-classify').checked,
         };
         const key = document.getElementById('ai-api-key').value.trim();
         if (key) payload.api_key = key;
@@ -354,7 +472,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    (async function init() { await loadLibrary(); await loadTypes(); await loadAiSettings(); })();
+    (async function init() { await loadLibrary(); await loadTypes(); await loadProviders(); await loadAiSettings(); })();
 });
 </script>
 {% endblock %}

@@ -1429,3 +1429,10 @@ a:hover {
     color: var(--color-accent);
 }
 
+
+/* Editable field rows on the Settings page (label + hints) */
+.field-row-editable { flex-direction: column; align-items: stretch; gap: 6px; }
+.fr-main { display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap; }
+.fr-label-input { min-width: 200px; font-weight: 500; }
+.fr-hints { display: flex; gap: var(--spacing-sm); flex-wrap: wrap; }
+.fr-hint-input { flex: 1 1 260px; font-size: 0.85rem; }

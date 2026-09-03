@@ -23,7 +23,9 @@ provides a searchable web interface and REST API.
 - **Typed fields** — every field is `text` / `number` / `date` / `id`; custom
   field values are stored typed and are searchable.
 - **Extraction cascade** — OCR (Tesseract, page-capped) → deterministic rules
-  → vision-AI fallback (only when rules leave gaps) → review queue.
+  → AI fallback (OCR text first, page images only if still needed; only when
+  rules leave gaps) → review queue. Daily AI call limit and per-call caps
+  bound cost.
   - Rules: SA-ID Luhn checksum, date parsing, label-anchored fields.
   - Vision AI reads page images directly, so it handles handwriting.
 - **Runtime AI config** — provider, model, API key and base URL are set in the
@@ -44,7 +46,7 @@ provides a searchable web interface and REST API.
 - Python 3.10+
 - Tesseract OCR and Poppler (system installs — see below)
 - PostgreSQL 13+ (production) — or SQLite for local development
-- An OpenAI-compatible API key or a local model (optional; only used as the
+- An OpenAI, Anthropic, xAI or other OpenAI-compatible API key, or a local model (optional; only used as the
   extraction fallback)
 
 ### Installing Tesseract & Poppler
@@ -112,7 +114,7 @@ RelatedDocumentServer/
 │   ├── models.py               # documents, document_types, document_field_values, app_settings
 │   ├── schemas.py              # Pydantic schemas
 │   ├── routers/                # documents, search, document_types, settings
-│   ├── services/               # storage, ocr, rules_extractor, vision_extractor,
+│   ├── services/               # storage, ocr, rules_extractor, ai_extractor, llm,
 │   │                           #   ai_extractor, llm, document_types, field_values,
 │   │                           #   settings, file_watcher
 │   └── templates/              # Jinja2 templates

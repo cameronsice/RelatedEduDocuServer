@@ -25,7 +25,7 @@ flowchart TB
     subgraph Tiers["Extraction cascade"]
         OCR[OCR / Tesseract]
         RULES[Rules extractor]
-        VISION[Vision AI]
+        VISION[AI: text, then images]
     end
     subgraph Data
         DB[(Database)]
@@ -48,8 +48,10 @@ system. It is deliberately **rules-first / minimal-AI**: the AI tier only runs
 when deterministic extraction can't fill every required field.
 
 1. **Store** — optimize + store the file (UUID name), generate PDF previews.
-2. **Identify** — document type from the upload form, or auto-detected from a
-   cheap one-page OCR (`_detect_document_type_from_ocr`). The type determines
+2. **Identify** — document type from the upload form, or auto-identified from
+   a cheap one-page OCR: per-type filename patterns and detection keywords
+   (`document_type_service.detect_type`), then an optional text-only AI
+   classification call, then the default. The type determines
    the field set and the page cap.
 3. **OCR** — Tesseract reads up to the type's `max_pages` (Certificate 1,
    POE 5). Page caps limit cost and how much of a document is processed
@@ -59,7 +61,8 @@ when deterministic extraction can't fill every required field.
    label-anchored named fields.
 5. **Gate 1** — if all *required* fields for the type are present, done.
    Otherwise escalate.
-6. **Vision AI** — `vision_extractor` renders the first `max_pages` page images
+6. **AI** — `ai_extractor` sends the OCR text first (cheap); only if required
+   fields are still missing (and the type allows it) it renders the first `max_pages` page images
    and asks the configured multimodal model for *only that type's* fields
    (reading images directly handles handwriting). Rules-validated values win;
    AI fills the gaps.
@@ -78,8 +81,8 @@ when deterministic extraction can't fill every required field.
 | **Documents** | `app/routers/documents.py` | CRUD, single + streaming bulk upload, the `process_document` cascade, review logic. |
 | **Search** | `app/routers/search.py` | Full-text search (incl. custom field values) + student/course/assignment autocomplete. |
 | **Document types** | `app/routers/document_types.py`, `app/services/document_types.py` | Configurable types & fields (CRUD), field registry, seeding, per-type `max_pages`. |
-| **Settings** | `app/routers/settings.py`, `app/services/settings.py` | Runtime AI config (provider/model/key/base URL) + connection test, stored in `app_settings`. |
-| **Extraction** | `app/services/rules_extractor.py`, `vision_extractor.py`, `ai_extractor.py`, `llm.py` | Deterministic rules, multimodal vision, text extraction, model-compat shim. |
+| **Settings** | `app/routers/settings.py`, `app/services/settings.py` | Runtime AI config (provider/model/key/base URL), cost guards (daily call limit, text/image caps), per-day usage metering, connection test; stored in `app_settings`. |
+| **Extraction** | `app/services/rules_extractor.py`, `ai_extractor.py`, `llm.py` | Deterministic rules; one type-driven AI extractor (text tier, image tier, classification, budget guard); provider layer (OpenAI-compatible incl. xAI/Azure/local, and Anthropic via its SDK). |
 | **Storage / OCR** | `app/services/storage.py`, `ocr_service.py` | Optimize/store/move files & previews; page-capped OCR. |
 | **Field values** | `app/services/field_values.py` | Typed read/write of custom field values. |
 | **Watcher** | `app/services/file_watcher.py` | Watch the scan folder; hand new files to the cascade. |

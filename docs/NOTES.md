@@ -8,7 +8,7 @@ Gotchas, decisions, and references.
   are not Python packages. On Windows, set `TESSERACT_CMD` and `POPPLER_PATH`
   in `.env` to the explicit binary / bin-dir paths so the server finds them
   even when they aren't on the process `PATH`. If unset, `PATH` is used.
-- **AI is a fallback, not a default** — the vision model only runs when the
+- **AI is a fallback, not a default** — the model only runs when the
   rules tier can't fill every required field. A clean printed certificate is
   handled entirely by rules (no AI call, no PII sent externally).
 - **Model parameter compatibility** — newer models (GPT-5 / o-series) require
@@ -47,6 +47,16 @@ Gotchas, decisions, and references.
   Settings page. Custom fields are typed and stored in `document_field_values`
   (not on the `documents` table), keeping existing data stable and every field
   searchable. See [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Cost guards** — AI tries OCR text first and only escalates to page
+  images when required fields are still missing (per-type `ai_input` can force
+  text-only or images-first). A daily AI call limit stops spend on a bad day:
+  once reached, documents route to review with "AI skipped". OCR chars and
+  page images per call are capped. Tokens are metered per document and per
+  day, visible on the Settings page and at `/api/settings/ai/usage`.
+- **Type identification is data** — filename patterns and first-page keywords
+  per type (Settings page), first match in sort order wins, AI classification
+  as an optional fallback. Give every type at least one rule; otherwise it can
+  only be reached by picking it on the upload form.
 - **AI provider is runtime config** — provider/model/API key/base URL live in
   `app_settings` and are editable in the UI. Base URL lets you point at a
   local/self-hosted OpenAI-compatible endpoint to keep data on-premises.

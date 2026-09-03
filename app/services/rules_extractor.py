@@ -136,6 +136,36 @@ _FIELD_ALIASES: dict[str, list[str]] = {
 
 _VALUE_STRIP = " \t:-–—"
 
+# Characters that only ever appear in OCR noise (tick boxes, table rules).
+_NOISE_CUT = re.compile(r"[\[\]|�{}<>~^\\]")
+# A leading parenthetical instruction such as "(as it appears on ID):".
+_LEADING_PAREN = re.compile(r"^\([^)]*\)\s*[:\-–—]?\s*")
+
+
+def clean_value(text: Optional[str]) -> Optional[str]:
+    """
+    Tidy a label-anchored value and reject OCR noise.
+
+    Cuts the value at the first tick-box / table character, drops a leading
+    "(instruction):" prefix, and rejects anything that is mostly symbols. A
+    rejected value is returned as None so the field stays empty and the AI
+    tier gets a chance at it — a wrong value that *looks* filled would
+    silently skip AI and land in the archive.
+    """
+    if not text:
+        return None
+    value = _NOISE_CUT.split(text, 1)[0]
+    value = _LEADING_PAREN.sub("", value.strip())
+    value = value.strip(_VALUE_STRIP).strip()
+    if not value:
+        return None
+    if len(value) == 1:  # grades can be a single letter or digit
+        return value if value.isalnum() else None
+    letters = sum(1 for ch in value if ch.isalnum())
+    if letters / max(1, len(value)) < 0.6:
+        return None
+    return value
+
 
 def _looks_like_value(text: str) -> bool:
     return bool(text) and len(text) >= 2
@@ -164,10 +194,10 @@ def _extract_by_label(lines: list[str], aliases: list[str], max_len: int = 160) 
             m = re.search(re.escape(alias) + r"\s*:", low)
             if not m:
                 continue
-            rest = line[m.end():].strip(_VALUE_STRIP).strip()
+            rest = clean_value(line[m.end():])
             if rest:  # any non-empty same-line value (grades can be one char)
                 return rest[:max_len]
-            value = _next_line_value(lines, idx, max_len)
+            value = clean_value(_next_line_value(lines, idx, max_len))
             if value:
                 return value
 
@@ -177,10 +207,10 @@ def _extract_by_label(lines: list[str], aliases: list[str], max_len: int = 160) 
         for alias in aliases:
             if not low.startswith(alias):
                 continue
-            rest = stripped[len(alias):].strip(_VALUE_STRIP).strip()
+            rest = clean_value(stripped[len(alias):])
             if rest:  # any non-empty same-line value (grades can be one char)
                 return rest[:max_len]
-            value = _next_line_value(lines, idx, max_len)
+            value = clean_value(_next_line_value(lines, idx, max_len))
             if value:
                 return value
     return None
@@ -205,6 +235,11 @@ class RulesExtractor:
             data_type = field.get("data_type", "text")
             if not key:
                 continue
+            # Fields marked handwritten are left to the AI image tier: OCR of
+            # handwriting yields plausible-looking garbage that would otherwise
+            # be accepted here and suppress the AI call.
+            if field.get("handwritten"):
+                continue
 
             if key == "student_id" or data_type == "id":
                 found = extract_sa_id(ocr_text)
@@ -216,9 +251,16 @@ class RulesExtractor:
                     values[key] = found
             else:
                 aliases = list(_FIELD_ALIASES.get(key, []))
-                label = (field.get("label") or "").lower()
-                if label and label not in aliases:
-                    aliases.append(label)
+                # Per-field aliases configured on the Settings page come first
+                # (most specific), then the field label, then a spaced-out
+                # version of the key ("company_name" -> "company name").
+                for extra in (
+                    list(field.get("aliases") or [])
+                    + [field.get("label") or "", key.replace("_", " ")]
+                ):
+                    extra = (extra or "").strip().lower()
+                    if extra and extra not in aliases:
+                        aliases.append(extra)
                 found = _extract_by_label(lines, aliases)
                 if found:
                     values[key] = found

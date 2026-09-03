@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-09-03
+
+- Document type auto-identification is now configuration: each type has
+  **filename patterns** and **first-page keywords** (Settings page), checked in
+  sort order; the first match wins. If nothing matches, an optional, cheap
+  text-only **AI classification** call picks from the configured types; only
+  then does the default apply. Replaces the hardcoded "certificate issued ->
+  certificate, else POE" check, which sent every scanned STUDENT ID / Agreement
+  / Contract to POE.
+- Field hints: every field can carry **aliases** (labels it appears under on the
+  page, used by the free rules extractor) and a **description** (used in the AI
+  prompt). Field labels are editable inline. `scripts/fix_field_config.py`
+  applies readable labels, aliases and detection rules to the existing types
+  and repairs values stored under a misspelled field key.
+- One AI extractor (`app/services/ai_extractor.py`) replaces the dead
+  text-only extractor and `vision_extractor.py`. Single prompt builder driven
+  by the type's fields. Two tiers: **OCR text only** (cheap) then **page images
+  + OCR text** (expensive), chosen per type via `ai_input`
+  (`text_then_images` default / `text` / `images`).
+- Cost guards (Settings page): **max AI calls per day** (documents go to the
+  review queue with "AI skipped" once reached, nothing is spent), **OCR
+  characters per call**, **max page images per call**, and a toggle for AI
+  classification. Token usage is recorded per document (`ai_input_tokens`,
+  `ai_output_tokens`) and per day (`GET /api/settings/ai/usage`; today's total
+  shown on the Settings page).
+- Provider abstraction (`app/services/llm.py`): the provider setting now does
+  something. **Anthropic (Claude)** via the official SDK and **xAI (Grok)** are
+  selectable alongside OpenAI, Azure OpenAI, local and custom OpenAI-compatible
+  endpoints; presets fill the default base URL and model. Test Connection goes
+  through the same layer.
+- Home page shows real type labels for all types (was POE/Certificate only).
+
 ## 2026-07-03
 
 - User Guide: a new in-app help page at `/guide` (nav link next to Settings),

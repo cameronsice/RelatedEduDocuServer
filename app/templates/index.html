@@ -71,7 +71,7 @@
                         <td class="cell-student">{{ doc.student_name or '—' }}</td>
                         <td class="cell-course">{{ doc.course_name or '—' }}</td>
                         <td class="cell-assignment">{{ doc.assignment_name or '—' }}</td>
-                        <td class="cell-type">{{ (doc.document_type or 'poe')|replace('poe', 'POE')|replace('certificate', 'Certificate') }}</td>
+                        <td class="cell-type">{{ type_labels.get(doc.document_type or 'poe', (doc.document_type or 'poe')|upper) }}</td>
                         <td class="cell-grade">
                             {% if doc.grade %}
                             <span class="grade-badge">{{ doc.grade }}</span>

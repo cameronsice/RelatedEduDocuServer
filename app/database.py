@@ -34,14 +34,24 @@ def _ensure_sqlite_columns():
     existing local DB needs these added without dropping data.
     """
     additions = {
-        "ai_used": "BOOLEAN DEFAULT 0",
-        "extraction_error": "VARCHAR(500)",
+        "documents": {
+            "ai_used": "BOOLEAN DEFAULT 0",
+            "extraction_error": "VARCHAR(500)",
+            "ai_input_tokens": "INTEGER",
+            "ai_output_tokens": "INTEGER",
+        },
+        "document_types": {
+            "detect_keywords": "JSON",
+            "filename_patterns": "JSON",
+            "ai_input": "VARCHAR(30) DEFAULT 'text_then_images'",
+        },
     }
     with engine.connect() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(documents)"))}
-        for name, ddl in additions.items():
-            if name not in existing:
-                conn.execute(text(f"ALTER TABLE documents ADD COLUMN {name} {ddl}"))
+        for table, columns in additions.items():
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
         conn.commit()
 
 
@@ -120,5 +130,16 @@ def init_db():
                 "ADD COLUMN IF NOT EXISTS extraction_error VARCHAR(500)"
             )
         )
+        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS ai_input_tokens INTEGER"))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS ai_output_tokens INTEGER"))
+        conn.execute(text("ALTER TABLE document_types ADD COLUMN IF NOT EXISTS detect_keywords JSON"))
+        conn.execute(text("ALTER TABLE document_types ADD COLUMN IF NOT EXISTS filename_patterns JSON"))
+        conn.execute(
+            text(
+                "ALTER TABLE document_types "
+                "ADD COLUMN IF NOT EXISTS ai_input VARCHAR(30) DEFAULT 'text_then_images'"
+            )
+        )
+        conn.execute(text("UPDATE document_types SET ai_input = 'text_then_images' WHERE ai_input IS NULL"))
         conn.commit()
 

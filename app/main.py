@@ -192,14 +192,16 @@ async def home(request: Request):
         recent_docs = db.query(Document).order_by(Document.created_at.desc()).limit(10).all()
         total_docs = db.query(Document).count()
         review_count = db.query(Document).filter(Document.requires_review.is_(True)).count()
-        
+        type_labels = {t["key"]: t["label"] for t in document_type_service.list_all(db)}
+
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 "recent_documents": recent_docs,
                 "total_documents": total_docs,
-                "review_count": review_count
+                "review_count": review_count,
+                "type_labels": type_labels,
             }
         )
     finally:

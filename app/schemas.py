@@ -44,6 +44,8 @@ class DocumentResponse(DocumentBase):
     extraction_confidence: Optional[float] = None
     ai_used: bool = False
     extraction_error: Optional[str] = None
+    ai_input_tokens: Optional[int] = None
+    ai_output_tokens: Optional[int] = None
     requires_review: bool
     review_reason: Optional[str] = None
     custom_fields: Optional[dict[str, Any]] = None
@@ -82,6 +84,9 @@ class FieldConfigIn(BaseModel):
     data_type: Optional[str] = None  # used for custom fields
     required: bool = False
     visible: bool = True
+    description: Optional[str] = None      # hint for the AI prompt
+    aliases: Optional[list[str]] = None    # extra labels for rules extraction
+    handwritten: bool = False              # skip text rules; AI reads the image
 
 
 class DocumentTypeIn(BaseModel):
@@ -91,6 +96,9 @@ class DocumentTypeIn(BaseModel):
     sort_order: int = 0
     is_active: bool = True
     max_pages: Optional[int] = None  # pages to OCR / send to AI
+    detect_keywords: Optional[list[str]] = None    # OCR substrings that identify the type
+    filename_patterns: Optional[list[str]] = None  # filename substrings that identify the type
+    ai_input: Optional[str] = None  # text_then_images | text | images
     fields: list[FieldConfigIn] = Field(default_factory=list)
 
 
@@ -102,15 +110,8 @@ class AISettingsIn(BaseModel):
     base_url: Optional[str] = None
     # Only applied when non-empty; blank means "keep existing key".
     api_key: Optional[str] = None
-
-
-class ExtractedFields(BaseModel):
-    """Schema for AI-extracted fields from OCR text."""
-    course_name: Optional[str] = None
-    student_name: Optional[str] = None
-    assignment_name: Optional[str] = None
-    grade: Optional[str] = None
-    document_date: Optional[str] = None
-    student_id: Optional[str] = None
-    confidence: float = 0.0
-
+    # Cost guards
+    daily_call_limit: Optional[int] = None
+    text_max_chars: Optional[int] = None
+    max_images: Optional[int] = None
+    classify_enabled: Optional[bool] = None

@@ -25,7 +25,6 @@ from app.services.document_types import document_type_service
 from app.services import field_values
 from app.services.settings import settings_service
 from app.services.rules_extractor import rules_extractor, validate_sa_id
-from app.services.vision_extractor import vision_extractor
 from app.config import SCAN_REVIEW_HOLD_PATH
 
 logger = logging.getLogger(__name__)
@@ -40,11 +39,39 @@ def _normalize_document_type(db: Session, value: Optional[str]) -> str:
     return document_type_service.normalize_type(db, value)
 
 
-def _detect_document_type_from_ocr(ocr_text: Optional[str]) -> str:
-    """If 'Certificate issued' appears in OCR text (case-insensitive), return 'certificate'; else 'poe'."""
-    if not ocr_text:
-        return "poe"
-    return "certificate" if "certificate issued" in ocr_text.lower() else "poe"
+def _identify_document_type(
+    db: Session,
+    ocr_text: Optional[str],
+    filename: Optional[str],
+    ai_config: dict,
+) -> tuple[str, dict]:
+    """
+    Identify the document type. Deterministic first (filename patterns and
+    detection keywords configured per type), then - only if nothing matched and
+    AI classification is enabled - one cheap text-only model call. Falls back
+    to the default type. Returns (type_key, ai_usage).
+    """
+    usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": None}
+    detected = document_type_service.detect_type(db, ocr_text, filename)
+    if detected:
+        logger.info("Type identified by rules: %s (%s)", detected, filename)
+        return _normalize_document_type(db, detected), usage
+
+    if ai_config.get("enabled") and ai_config.get("api_key") and ai_config.get("classify_enabled"):
+        result = ai_extractor_service.classify(
+            db, ocr_text, filename, document_type_service.list_types(db), ai_config
+        )
+        usage.update({k: result.get(k, 0) for k in ("calls", "input_tokens", "output_tokens")})
+        usage["error"] = result.get("error")
+        if result.get("type"):
+            logger.info(
+                "Type identified by AI: %s (confidence %.2f, %s)",
+                result["type"], result.get("confidence", 0.0), filename,
+            )
+            return _normalize_document_type(db, result["type"]), usage
+
+    logger.info("Type not identified for %s; using default", filename)
+    return _normalize_document_type(db, None), usage
 
 
 def _extract_student_id_fallback(ocr_text: Optional[str]) -> Optional[str]:
@@ -525,13 +552,21 @@ def process_document(
 
     # 2. Resolve document type (needed to know the page cap and field set).
     _notify("identify")
+    ai_config = settings_service.ai_config(db)
+    ai_input_tokens = 0
+    ai_output_tokens = 0
+    ai_calls = 0
+    source_name = original_filename or file_path.name
     if document_type_override:
         document_type = _normalize_document_type(db, document_type_override)
         detect_text = None
     else:
-        # Cheap single-page OCR just to detect the type.
+        # Cheap single-page OCR just to identify the type.
         detect_text = ocr_service.extract_text(file_path, max_pages=1)
-        document_type = _normalize_document_type(db, _detect_document_type_from_ocr(detect_text))
+        document_type, identify_usage = _identify_document_type(db, detect_text, source_name, ai_config)
+        ai_calls += identify_usage["calls"]
+        ai_input_tokens += identify_usage["input_tokens"]
+        ai_output_tokens += identify_usage["output_tokens"]
 
     type_config = document_type_service.get_type(db, document_type) or {}
     max_pages = int(type_config.get("max_pages", 1) or 1)
@@ -549,18 +584,28 @@ def process_document(
     required_keys = document_type_service.required_field_keys(db, document_type)
     missing_required = [k for k in required_keys if not values.get(k)]
 
-    # 5. Tier 2 — vision AI fallback, only if rules left required fields empty.
-    used_ai = False
+    # 5. Tier 2 — AI fallback (text first, images only if needed), only if
+    #    rules left required fields empty. Budget-guarded: when the daily AI
+    #    call limit is reached the document goes to review instead.
+    used_ai = ai_calls > 0
     ai_error = None
+    ai_skipped = None
     confidence = 0.9  # deterministic rules are treated as high-confidence
-    ai_config = settings_service.ai_config(db)
     if missing_required and ai_config.get("enabled") and ai_config.get("api_key"):
         _notify("ai")
-        vision = vision_extractor.extract(file_path, type_config, ai_config, max_pages)
-        used_ai = True
-        ai_error = vision.get("error")
-        confidence = float(vision.get("confidence") or 0.0)
-        for key, val in vision.get("values", {}).items():
+        ai_result = ai_extractor_service.extract(
+            db, file_path, type_config, ai_config, ocr_text, required_keys, known_values=values
+        )
+        ai_calls += ai_result["calls"]
+        ai_input_tokens += ai_result["input_tokens"]
+        ai_output_tokens += ai_result["output_tokens"]
+        if ai_result.get("budget_exhausted"):
+            ai_skipped = ai_result.get("error") or "AI daily call limit reached"
+        else:
+            used_ai = True
+            ai_error = ai_result.get("error")
+            confidence = float(ai_result.get("confidence") or 0.0)
+        for key, val in ai_result.get("values", {}).items():
             values.setdefault(key, val)  # rules-validated values win; AI fills gaps
 
     # 6. Validate the ID by checksum — never trust an unvalidated ID.
@@ -582,6 +627,10 @@ def process_document(
     if ai_error:
         requires_review = True
         review_reason = f"AI extraction failed; {review_reason}" if review_reason else "AI extraction failed"
+    # Budget guard tripped: no money spent, but the fields still need a human.
+    if ai_skipped:
+        requires_review = True
+        review_reason = f"AI skipped ({ai_skipped}); {review_reason}" if review_reason else f"AI skipped ({ai_skipped})"
 
     # 9. Move to review or final storage.
     if requires_review:
@@ -613,6 +662,8 @@ def process_document(
         extraction_confidence=confidence,
         ai_used=used_ai,
         extraction_error=ai_error,
+        ai_input_tokens=ai_input_tokens or None,
+        ai_output_tokens=ai_output_tokens or None,
         requires_review=requires_review,
         review_reason=review_reason,
     )
@@ -631,8 +682,8 @@ def process_document(
     db.refresh(document)
 
     logger.info(
-        "Document processed: %s (type=%s, ai=%s, review=%s)",
-        document.id, document_type, used_ai, requires_review,
+        "Document processed: %s (type=%s, ai=%s, ai_calls=%d, tokens=%d/%d, review=%s)",
+        document.id, document_type, used_ai, ai_calls, ai_input_tokens, ai_output_tokens, requires_review,
     )
     return document
 

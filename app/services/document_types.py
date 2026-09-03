@@ -65,6 +65,7 @@ DEFAULT_DOCUMENT_TYPES: list[dict] = [
         "label": "Certificate",
         "sort_order": 2,
         "max_pages": 1,
+        "detect_keywords": ["certificate issued"],
         "fields": [
             {"key": "student_name", "required": True, "visible": True},
             {"key": "course_name", "required": True, "visible": True},
@@ -76,6 +77,27 @@ DEFAULT_DOCUMENT_TYPES: list[dict] = [
 
 # Fallback type key when a value is missing or not recognized.
 DEFAULT_TYPE_KEY = "poe"
+
+# What the AI tier may look at for a type (see DocumentType.ai_input).
+AI_INPUT_MODES = ("text_then_images", "text", "images")
+DEFAULT_AI_INPUT = "text_then_images"
+
+
+def _clean_list(value) -> list[str]:
+    """Normalize a list (or comma/newline separated string) of short strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = re.split(r"[,\n]", value)
+    else:
+        parts = list(value)
+    out, seen = [], set()
+    for p in parts:
+        item = str(p or "").strip()
+        if item and item.lower() not in seen:
+            seen.add(item.lower())
+            out.append(item)
+    return out
 
 
 class DocumentTypeService:
@@ -103,6 +125,9 @@ class DocumentTypeService:
                     is_active=True,
                     fields=spec["fields"],
                     max_pages=spec.get("max_pages", 1),
+                    detect_keywords=spec.get("detect_keywords", []),
+                    filename_patterns=spec.get("filename_patterns", []),
+                    ai_input=spec.get("ai_input", DEFAULT_AI_INPUT),
                 )
             )
             logger.info("Seeded default document type: %s", spec["key"])
@@ -140,6 +165,12 @@ class DocumentTypeService:
             "source": source,
             "required": bool(field.get("required", False)),
             "visible": bool(field.get("visible", True)),
+            # Hint for the AI prompt (e.g. "the employer registered company name").
+            "description": str(field.get("description") or "").strip(),
+            # Extra labels the rules extractor should look for in OCR text.
+            "aliases": _clean_list(field.get("aliases")),
+            # Usually handwritten: skip text rules, let the AI read the image.
+            "handwritten": bool(field.get("handwritten", False)),
         }
 
     def _rows(self, db: Session) -> list[DocumentType]:
@@ -161,6 +192,9 @@ class DocumentTypeService:
                 is_active=True,
                 fields=s["fields"],
                 max_pages=s.get("max_pages", 1),
+                detect_keywords=s.get("detect_keywords", []),
+                filename_patterns=s.get("filename_patterns", []),
+                ai_input=s.get("ai_input", DEFAULT_AI_INPUT),
             )
             for s in DEFAULT_DOCUMENT_TYPES
         ]
@@ -175,10 +209,18 @@ class DocumentTypeService:
                     "key": row.key,
                     "label": row.label,
                     "max_pages": row.max_pages,
+                    "detect_keywords": _clean_list(row.detect_keywords),
+                    "filename_patterns": _clean_list(row.filename_patterns),
+                    "ai_input": self._normalize_ai_input(row.ai_input),
                     "fields": [f for f in fields if f],
                 }
             )
         return result
+
+    @staticmethod
+    def _normalize_ai_input(value) -> str:
+        v = (value or "").strip().lower()
+        return v if v in AI_INPUT_MODES else DEFAULT_AI_INPUT
 
     def list_all(self, db: Session) -> list[dict]:
         """All types (active + inactive) with is_active/sort_order — for admin."""
@@ -199,6 +241,9 @@ class DocumentTypeService:
                     "is_active": bool(row.is_active),
                     "sort_order": row.sort_order,
                     "max_pages": row.max_pages,
+                    "detect_keywords": _clean_list(row.detect_keywords),
+                    "filename_patterns": _clean_list(row.filename_patterns),
+                    "ai_input": self._normalize_ai_input(row.ai_input),
                     "fields": [f for f in fields if f],
                 }
             )
@@ -225,6 +270,32 @@ class DocumentTypeService:
                 return v
         allowed = self.allowed_keys(db)
         return DEFAULT_TYPE_KEY if DEFAULT_TYPE_KEY in allowed else (allowed[0] if allowed else DEFAULT_TYPE_KEY)
+
+    def detect_type(
+        self, db: Session, ocr_text: Optional[str], filename: Optional[str]
+    ) -> Optional[str]:
+        """
+        Deterministic type identification (case-insensitive substring matches).
+
+        Pass 1: detection keywords against the first-page OCR text, types in
+        sort order - what the page *says* is the strongest evidence.
+        Pass 2: filename patterns against the original filename - a fallback
+        for unreadable scans (scanner naming is coarser: e.g. both a Workplace
+        Agreement and a Learner Contract may be named "..._Agreement_...").
+        Returns the first matching key, or None.
+        """
+        name = (filename or "").lower()
+        text = (ocr_text or "").lower()
+        types = self.list_types(db)
+        if text:
+            for t in types:
+                if any(k.lower() in text for k in t["detect_keywords"]):
+                    return t["key"]
+        if name:
+            for t in types:
+                if any(p.lower() in name for p in t["filename_patterns"]):
+                    return t["key"]
+        return None
 
     def required_field_keys(self, db: Session, key: Optional[str]) -> list[str]:
         """The field keys that must be present for a document of this type."""
@@ -279,6 +350,7 @@ class DocumentTypeService:
             }
             if raw.get("label"):
                 entry["label"] = str(raw["label"]).strip()
+            self._apply_field_hints(entry, raw)
             return entry
 
         # Custom field: derive a safe key, validate type.
@@ -289,13 +361,26 @@ class DocumentTypeService:
         if data_type not in FIELD_DATA_TYPES:
             data_type = "text"
         label = (raw.get("label") or slug.replace("_", " ").title()).strip()
-        return {
+        entry = {
             "key": slug,
             "label": label,
             "data_type": data_type,
             "required": bool(raw.get("required", False)),
             "visible": bool(raw.get("visible", True)),
         }
+        self._apply_field_hints(entry, raw)
+        return entry
+
+    @staticmethod
+    def _apply_field_hints(entry: dict, raw: dict) -> None:
+        description = str(raw.get("description") or "").strip()
+        aliases = _clean_list(raw.get("aliases"))
+        if description:
+            entry["description"] = description[:300]
+        if aliases:
+            entry["aliases"] = aliases[:20]
+        if raw.get("handwritten"):
+            entry["handwritten"] = True
 
     def _normalize_fields(self, fields) -> list:
         out, seen = [], set()
@@ -320,6 +405,9 @@ class DocumentTypeService:
             is_active=bool(data.get("is_active", True)),
             fields=self._normalize_fields(data.get("fields")),
             max_pages=max(1, int(data.get("max_pages") or 1)),
+            detect_keywords=_clean_list(data.get("detect_keywords")),
+            filename_patterns=_clean_list(data.get("filename_patterns")),
+            ai_input=self._normalize_ai_input(data.get("ai_input")),
         )
         db.add(dt)
         db.commit()
@@ -341,6 +429,12 @@ class DocumentTypeService:
             dt.max_pages = max(1, int(data["max_pages"]))
         if data.get("fields") is not None:
             dt.fields = self._normalize_fields(data.get("fields"))
+        if data.get("detect_keywords") is not None:
+            dt.detect_keywords = _clean_list(data.get("detect_keywords"))
+        if data.get("filename_patterns") is not None:
+            dt.filename_patterns = _clean_list(data.get("filename_patterns"))
+        if data.get("ai_input") is not None:
+            dt.ai_input = self._normalize_ai_input(data.get("ai_input"))
         db.commit()
         db.refresh(dt)
         logger.info("Updated document type: %s", key)

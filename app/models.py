@@ -31,6 +31,10 @@ class Document(Base):
     # if that AI call failed (so failures are visible, not silently swallowed).
     ai_used = Column(Boolean, nullable=False, default=False)
     extraction_error = Column(String(500), nullable=True)
+    # Tokens spent on AI calls for this document (all tiers summed), so cost
+    # can be metered per document and per day.
+    ai_input_tokens = Column(Integer, nullable=True)
+    ai_output_tokens = Column(Integer, nullable=True)
     requires_review = Column(Boolean, nullable=False, default=False)
     review_reason = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -61,6 +65,16 @@ class DocumentType(Base):
     fields = Column(JSON, nullable=False, default=list)
     # Max pages to OCR / send to AI for this type (caps cost and data sent).
     max_pages = Column(Integer, nullable=False, default=1)
+    # Auto-identification: case-insensitive substrings matched against the
+    # first-page OCR text (detect_keywords) and the original filename
+    # (filename_patterns). First active type (by sort_order) that matches wins.
+    detect_keywords = Column(JSON, nullable=True, default=list)
+    filename_patterns = Column(JSON, nullable=True, default=list)
+    # What the AI tier is allowed to see for this type:
+    #   text_then_images (default) - try OCR text first, images only if needed
+    #   text              - OCR text only, never images (cheapest)
+    #   images            - page images (+ OCR text) straight away (handwriting)
+    ai_input = Column(String(30), nullable=False, default="text_then_images")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

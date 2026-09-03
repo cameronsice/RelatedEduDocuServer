@@ -13,8 +13,9 @@ Prioritized backlog. Use `[ ]` Todo, `[x]` Done, `[>]` In progress.
 
 ## Extraction / AI
 
-- [ ] Make type **identification** more robust — currently a keyword heuristic
-      (`_detect_document_type_from_ocr`). Options: per-type detection keywords
+- [x] Make type **identification** more robust — per-type filename patterns and
+      detection keywords, with an AI classification fallback. (Was a hardcoded
+      keyword heuristic.) Remaining idea: per-type detection keywords
       configured in Settings, keyword scoring, or an AI-assisted identify step.
 - [ ] Optional shared **field library** (reuse custom fields across types).
 - [ ] Search/filter UI for custom fields (values are already stored + indexed).
